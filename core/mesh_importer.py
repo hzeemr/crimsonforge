@@ -831,8 +831,117 @@ def _pack_static_vertex_record(
     return rec
 
 
+def _replace_all_in_region(
+    data: bytearray,
+    start: int,
+    end: int,
+    old: bytes,
+    new: bytes,
+) -> int:
+    """Replace all occurrences of a fixed-size pattern inside a bounded region."""
+    if not old or old == new or start >= end:
+        return 0
+
+    hits = 0
+    cursor = start
+    while True:
+        pos = data.find(old, cursor, end)
+        if pos < 0:
+            break
+        data[pos:pos + len(old)] = new
+        hits += 1
+        cursor = pos + len(new)
+    return hits
+
+
+def _sync_pam_header_mirrors(
+    result: bytearray,
+    original_mesh: ParsedMesh,
+    new_mesh: ParsedMesh,
+    geom_off: int,
+) -> int:
+    """Update mirrored PAM metadata between the main table and geometry block."""
+    mesh_count = min(len(original_mesh.submeshes), len(new_mesh.submeshes))
+    region_start = 0x410 + mesh_count * 0x218
+    region_end = min(max(geom_off, region_start), len(result))
+    if region_start >= region_end:
+        return 0
+
+    patched = 0
+
+    for orig_sm, new_sm in zip(original_mesh.submeshes, new_mesh.submeshes):
+        orig_nv = len(orig_sm.vertices)
+        orig_ni = len(orig_sm.faces) * 3
+        new_nv = len(new_sm.vertices)
+        new_ni = len(new_sm.faces) * 3
+
+        if orig_sm.vertices:
+            oxs, oys, ozs = zip(*orig_sm.vertices)
+            old_bbox = (
+                min(oxs), min(oys), min(ozs),
+                max(oxs), max(oys), max(ozs),
+            )
+        else:
+            old_bbox = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+        if new_sm.vertices:
+            nxs, nys, nzs = zip(*new_sm.vertices)
+            new_bbox = (
+                min(nxs), min(nys), min(nzs),
+                max(nxs), max(nys), max(nzs),
+            )
+        else:
+            new_bbox = old_bbox
+
+        old_bbox_bytes = struct.pack("<6f", *old_bbox)
+        new_bbox_bytes = struct.pack("<6f", *new_bbox)
+
+        patched += _replace_all_in_region(
+            result,
+            region_start,
+            region_end,
+            struct.pack("<I", orig_ni) + old_bbox_bytes,
+            struct.pack("<I", new_ni) + new_bbox_bytes,
+        )
+        patched += _replace_all_in_region(
+            result,
+            region_start,
+            region_end,
+            old_bbox_bytes,
+            new_bbox_bytes,
+        )
+
+        old_pair = struct.pack("<II", orig_nv, orig_ni)
+        new_pair = struct.pack("<II", new_nv, new_ni)
+        if old_pair == new_pair:
+            continue
+
+        anchor_names = []
+        if orig_sm.texture:
+            anchor_names.append(orig_sm.texture.encode("ascii", "ignore"))
+        if orig_sm.material:
+            anchor_names.append(orig_sm.material.encode("ascii", "ignore"))
+
+        for anchor in anchor_names:
+            if not anchor:
+                continue
+            cursor = region_start
+            while True:
+                pos = result.find(anchor, cursor, region_end)
+                if pos < 0:
+                    break
+                pair_off = pos - 8
+                if pair_off >= region_start and bytes(result[pair_off:pair_off + 8]) == old_pair:
+                    result[pair_off:pair_off + 8] = new_pair
+                    patched += 1
+                cursor = pos + len(anchor)
+
+    return patched
+
+
 def _serialize_pam_combined_layout(
     mesh: ParsedMesh,
+    original_mesh: ParsedMesh,
     original_data: bytes,
     layout: dict,
     bmin: tuple[float, float, float],
@@ -880,16 +989,18 @@ def _serialize_pam_combined_layout(
     result.extend(geom_data)
     result.extend(index_data)
     result.extend(original_data[old_geom_end:])
+    mirror_patches = _sync_pam_header_mirrors(result, original_mesh, mesh, geom_off)
     logger.info(
-        "Built PAM %s with full combined rebuild: %d submeshes, %d verts, %d faces",
+        "Built PAM %s with full combined rebuild: %d submeshes, %d verts, %d faces (%d mirrored header patches)",
         mesh.path, len(mesh.submeshes), sum(len(sm.vertices) for sm in mesh.submeshes),
-        sum(len(sm.faces) for sm in mesh.submeshes),
+        sum(len(sm.faces) for sm in mesh.submeshes), mirror_patches,
     )
     return bytes(result)
 
 
 def _serialize_pam_scan_combined_layout(
     mesh: ParsedMesh,
+    original_mesh: ParsedMesh,
     original_data: bytes,
     layout: dict,
     bmin: tuple[float, float, float],
@@ -937,16 +1048,18 @@ def _serialize_pam_scan_combined_layout(
     result.extend(geom_data)
     result.extend(index_data)
     result.extend(original_data[old_geom_end:])
+    mirror_patches = _sync_pam_header_mirrors(result, original_mesh, mesh, layout["geom_off"])
     logger.info(
-        "Built PAM %s with full scan-combined rebuild: %d submeshes, %d verts, %d faces",
+        "Built PAM %s with full scan-combined rebuild: %d submeshes, %d verts, %d faces (%d mirrored header patches)",
         mesh.path, len(mesh.submeshes), sum(len(sm.vertices) for sm in mesh.submeshes),
-        sum(len(sm.faces) for sm in mesh.submeshes),
+        sum(len(sm.faces) for sm in mesh.submeshes), mirror_patches,
     )
     return bytes(result)
 
 
 def _serialize_pam_backward_scan_combined_layout(
     mesh: ParsedMesh,
+    original_mesh: ParsedMesh,
     original_data: bytes,
     layout: dict,
     bmin: tuple[float, float, float],
@@ -997,16 +1110,18 @@ def _serialize_pam_backward_scan_combined_layout(
     result.extend(original_data[vertex_end:idx_base])
     result.extend(index_data)
     result.extend(original_data[old_geom_end:])
+    mirror_patches = _sync_pam_header_mirrors(result, original_mesh, mesh, geom_off)
     logger.info(
-        "Built PAM %s with full backward-scan rebuild: %d submeshes, %d verts, %d faces",
+        "Built PAM %s with full backward-scan rebuild: %d submeshes, %d verts, %d faces (%d mirrored header patches)",
         mesh.path, len(mesh.submeshes), sum(len(sm.vertices) for sm in mesh.submeshes),
-        sum(len(sm.faces) for sm in mesh.submeshes),
+        sum(len(sm.faces) for sm in mesh.submeshes), mirror_patches,
     )
     return bytes(result)
 
 
 def _serialize_pam_local_layout(
     mesh: ParsedMesh,
+    original_mesh: ParsedMesh,
     original_data: bytes,
     layout: dict,
     bmin: tuple[float, float, float],
@@ -1050,10 +1165,11 @@ def _serialize_pam_local_layout(
 
     result.extend(geom_data)
     result.extend(original_data[old_geom_end:])
+    mirror_patches = _sync_pam_header_mirrors(result, original_mesh, mesh, geom_off)
     logger.info(
-        "Built PAM %s with full local rebuild: %d submeshes, %d verts, %d faces",
+        "Built PAM %s with full local rebuild: %d submeshes, %d verts, %d faces (%d mirrored header patches)",
         mesh.path, len(mesh.submeshes), sum(len(sm.vertices) for sm in mesh.submeshes),
-        sum(len(sm.faces) for sm in mesh.submeshes),
+        sum(len(sm.faces) for sm in mesh.submeshes), mirror_patches,
     )
     return bytes(result)
 
@@ -1593,13 +1709,21 @@ def build_pam(mesh: ParsedMesh, original_data: bytes) -> bytes:
 
         layout = _inspect_pam_layout(original_data)
         if layout["kind"] == "combined":
-            return _serialize_pam_combined_layout(working_mesh, original_data, layout, bmin, bmax)
+            return _serialize_pam_combined_layout(
+                working_mesh, original_mesh, original_data, layout, bmin, bmax
+            )
         if layout["kind"] == "scan_combined":
-            return _serialize_pam_scan_combined_layout(working_mesh, original_data, layout, bmin, bmax)
+            return _serialize_pam_scan_combined_layout(
+                working_mesh, original_mesh, original_data, layout, bmin, bmax
+            )
         if layout["kind"] == "backward_scan_combined":
-            return _serialize_pam_backward_scan_combined_layout(working_mesh, original_data, layout, bmin, bmax)
+            return _serialize_pam_backward_scan_combined_layout(
+                working_mesh, original_mesh, original_data, layout, bmin, bmax
+            )
         if layout["kind"] == "local":
-            return _serialize_pam_local_layout(working_mesh, original_data, layout, bmin, bmax)
+            return _serialize_pam_local_layout(
+                working_mesh, original_mesh, original_data, layout, bmin, bmax
+            )
         raise ValueError(
             "This PAM layout currently supports position-only patching. "
             f"Topology/UV edits are not supported for it yet ({layout.get('reason', 'unknown layout')})."

@@ -158,7 +158,13 @@ def decode_dds_to_rgba(data: bytes) -> tuple[int, int, bytes]:
 
     if not info.compressed and info.bits_per_pixel == 32:
         # Uncompressed BGRA → RGBA
-        pixel_data = data[offset:offset + w * h * 4]
+        expected_size = w * h * 4
+        pixel_data = data[offset:offset + expected_size]
+        if len(pixel_data) < expected_size:
+            raise ValueError(
+                "DDS header claims an uncompressed 32-bit image, "
+                f"but only {len(pixel_data)} of {expected_size} bytes are present."
+            )
         rgba = bytearray(len(pixel_data))
         for i in range(0, len(pixel_data), 4):
             if i + 3 < len(pixel_data):

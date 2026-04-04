@@ -229,6 +229,17 @@ class TranslateTab(QWidget):
         )
         sb_layout.addWidget(self._game_version_label)
 
+        self._sync_summary_label = QLabel("Text Sync: waiting")
+        self._sync_summary_label.setToolTip(
+            "Shows the latest tracked game-text sync for this project,\n"
+            "including which build added, changed, or removed strings."
+        )
+        self._sync_summary_label.setStyleSheet(
+            "font-size: 11px; color: #89b4fa; padding: 0 6px;"
+            "border-right: 1px solid #313244;"
+        )
+        sb_layout.addWidget(self._sync_summary_label)
+
         # Progress bar (compact)
         self._stats_progress = QProgressBar()
         self._stats_progress.setToolTip(
@@ -451,6 +462,7 @@ class TranslateTab(QWidget):
             self._autosave_label.setText("Autosave: Off")
             self._autosave_label.setStyleSheet("font-size: 11px; color: #f9e2af; padding: 0 4px;")
             self._autosave_label.setToolTip("Autosave is disabled in Settings > Translation.")
+            self._update_sync_summary_label()
             return
 
         effective_time = last_save_time or self._autosave.last_save_time
@@ -499,36 +511,129 @@ class TranslateTab(QWidget):
             )
 
         count = len(self._discovered_palocs)
-        # Show game version info
-        game_version = self._get_game_version_short()
-        if game_version:
-            self._paloc_info.setText(f"{count} game languages detected | {game_version}")
-            self._game_version_label.setText(game_version)
+        build_info = self._get_game_build_info()
+        if build_info["short_label"]:
+            self._paloc_info.setText(f"{count} game languages detected | {build_info['short_label']}")
         else:
             self._paloc_info.setText(f"{count} game languages detected")
+        self._update_game_header()
+        self._update_sync_summary_label()
         self._progress.set_status(f"Game loaded: {count} localization files found")
 
-    def _get_game_version_short(self) -> str:
-        """Get a short game version string from PAPGT fingerprint."""
+    def _get_game_build_info(self) -> dict:
+        """Get the current game build metadata from 0.paver + 0.papgt."""
+        info = {
+            "version_text": "",
+            "build_id": "",
+            "build_display": "",
+            "fingerprint": "",
+            "short_label": "",
+            "modified": "",
+            "crc": 0,
+            "size": 0,
+        }
         try:
+            import struct
+            from datetime import datetime
+
             game_path = self._config.get("general.last_game_path", "")
             if not game_path:
-                return ""
+                return info
+
+            paver_path = os.path.join(game_path, "meta", "0.paver")
+            if os.path.isfile(paver_path):
+                with open(paver_path, "rb") as f:
+                    paver_data = f.read()
+                if len(paver_data) >= 6:
+                    major, minor, patch = struct.unpack_from("<HHH", paver_data, 0)
+                    info["version_text"] = f"v{major}.{minor:02d}.{patch:02d}"
+
             papgt_path = os.path.join(game_path, "meta", "0.papgt")
-            if not os.path.isfile(papgt_path):
-                return ""
-            from datetime import datetime
-            stat = os.stat(papgt_path)
-            mod_time = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d")
-            from core.checksum_engine import pa_checksum
-            with open(papgt_path, "rb") as f:
-                data = f.read()
-            crc = pa_checksum(data[12:]) if len(data) > 12 else 0
-            return f"Game v0x{crc:08X} ({mod_time})"
+            if os.path.isfile(papgt_path):
+                stat = os.stat(papgt_path)
+                info["modified"] = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                with open(papgt_path, "rb") as f:
+                    papgt_data = f.read()
+                info["size"] = len(papgt_data)
+                if len(papgt_data) > 12:
+                    info["crc"] = pa_checksum(papgt_data[12:])
+
+            version_text = info["version_text"]
+            crc = info["crc"]
+            if version_text and crc:
+                info["build_id"] = f"{version_text}|CRC:0x{crc:08X}"
+                info["build_display"] = f"{version_text} | CRC 0x{crc:08X}"
+            elif version_text:
+                info["build_id"] = version_text
+                info["build_display"] = version_text
+            elif crc:
+                info["build_id"] = f"CRC:0x{crc:08X}"
+                info["build_display"] = f"CRC 0x{crc:08X}"
+
+            if info["build_id"]:
+                info["fingerprint"] = f"{info['build_id']}|SIZE:{info['size']}"
+            elif info["size"]:
+                info["fingerprint"] = f"SIZE:{info['size']}"
+
+            info["short_label"] = info["build_display"]
+            if info["short_label"] and info["modified"]:
+                info["short_label"] = f"{info['short_label']} | {info['modified']}"
         except Exception:
-            return ""
+            return info
+        return info
+
+    def _get_game_version_short(self) -> str:
+        """Get a short game version string for status labels."""
+        return self._get_game_build_info().get("short_label", "")
+
+    def _update_game_header(self) -> None:
+        build_info = self._get_game_build_info()
+        build_display = build_info.get("build_display", "")
+        short_label = build_info.get("short_label", "")
+        self._game_version_label.setText(build_display or "Game build unknown")
+        self._game_version_label.setToolTip(
+            short_label
+            or "Game build metadata could not be detected from meta/0.paver and meta/0.papgt."
+        )
+
+    def _update_sync_summary_label(self) -> None:
+        summary = self._project.last_sync_summary if self._project.entries else {}
+        build_display = self._project.game_build_display or self._get_game_build_info().get("build_display", "")
+
+        if summary:
+            parts = []
+            if summary.get("new", 0):
+                parts.append(f"+{int(summary['new']):,}")
+            if summary.get("changed", 0):
+                parts.append(f"~{int(summary['changed']):,}")
+            if summary.get("removed", 0):
+                parts.append(f"-{int(summary['removed']):,}")
+            delta_text = " ".join(parts) if parts else "up to date"
+            display = summary.get("display", build_display or summary.get("version", ""))
+            self._sync_summary_label.setText(f"Text Sync: {display} | {delta_text}".strip())
+            self._sync_summary_label.setToolTip(
+                "Latest text sync summary.\n"
+                f"Build: {display or 'Unknown'}\n"
+                f"Added: {int(summary.get('new', 0)):,}\n"
+                f"Changed: {int(summary.get('changed', 0)):,}\n"
+                f"Removed: {int(summary.get('removed', 0)):,}"
+            )
+            return
+
+        if build_display:
+            self._sync_summary_label.setText(f"Text Sync: {build_display}")
+            self._sync_summary_label.setToolTip(
+                "No text-delta history has been recorded for this project yet.\n"
+                f"Current build: {build_display}"
+            )
+        else:
+            self._sync_summary_label.setText("Text Sync: waiting")
+            self._sync_summary_label.setToolTip(
+                "Load the game and a language file to start version-aware text tracking."
+            )
 
     def _serialize_ui_state(self) -> dict:
+        build_info = self._get_game_build_info()
         return {
             "source_lang": self._project.source_lang,
             "target_lang": self._project.target_lang,
@@ -536,7 +641,9 @@ class TranslateTab(QWidget):
             "source_combo_text": self._source_combo.currentText(),
             "target_combo_index": self._target_combo.currentIndex(),
             "provider_id": self._provider_combo.currentData() or "",
-            "game_fingerprint": self._get_game_fingerprint(),
+            "game_build_id": build_info.get("build_id", ""),
+            "game_build_display": build_info.get("build_display", ""),
+            "game_fingerprint": build_info.get("fingerprint", ""),
         }
 
     def _persist_ui_state(self) -> None:
@@ -596,72 +703,90 @@ class TranslateTab(QWidget):
 
             source_code = paloc_info["lang_code"]
             target_code = self._target_combo.currentData() or ""
+            build_info = self._get_game_build_info()
 
-            # Save baseline if first time loading this language
+            # Preserve the original baseline forever and only add newly discovered keys.
             filename = paloc_info["filename"]
-            if not self._baseline_mgr.has_baseline(filename):
-                self._baseline_mgr.save_baseline(filename, string_entries, source_code)
-                logger.info("First load: baseline saved for %s", filename)
-            else:
-                # Detect changes since baseline
-                diff = self._baseline_mgr.diff_with_current(filename, string_entries)
-                if diff["new"] or diff["removed"] or diff["changed"]:
-                    logger.info("Game update detected: %d new, %d removed, %d changed strings",
-                                len(diff["new"]), len(diff["removed"]), len(diff["changed"]))
-                    self._baseline_mgr.force_save_baseline(filename, string_entries, source_code)
+            baseline_merge = self._baseline_mgr.merge_into_baseline(
+                filename,
+                string_entries,
+                source_code,
+                build_id=build_info.get("build_id", ""),
+                build_display=build_info.get("build_display", ""),
+                game_fingerprint=build_info.get("fingerprint", ""),
+            )
+            if baseline_merge.get("added", 0):
+                logger.info(
+                    "Baseline extended for %s with %d newly discovered keys",
+                    filename,
+                    int(baseline_merge["added"]),
+                )
 
-            # Load saved translations from previous session
-            saved_translations = {}
+            saved_project = None
             recovery_dir = os.path.join(os.path.expanduser("~"), ".crimsonforge")
             recovery_path = os.path.join(recovery_dir, "autosave_project.json")
             if os.path.isfile(recovery_path):
                 try:
-                    saved_project = TranslationProject()
-                    saved_project.load(recovery_path)
-                    if saved_project.source_file == filename:
-                        for entry in saved_project.entries:
-                            if entry.translated_text:
-                                saved_translations[entry.key] = {
-                                    "text": entry.translated_text,
-                                    "status": entry.status,
-                                    "provider": entry.ai_provider,
-                                    "model": entry.ai_model,
-                                }
-                        logger.info("Found %d saved translations from previous session",
-                                    len(saved_translations))
+                    candidate = TranslationProject()
+                    candidate.load(recovery_path)
+                    if candidate.source_file == filename:
+                        saved_project = candidate
+                        logger.info(
+                            "Found saved translation project for %s (%d entries)",
+                            filename,
+                            candidate.entry_count,
+                        )
                 except Exception as ex:
-                    logger.warning("Could not load saved translations: %s", ex)
+                    logger.warning("Could not load saved project: %s", ex)
 
-            # Use BASELINE as original text (immutable reference)
-            baseline = self._baseline_mgr.load_baseline(filename)
-            baseline_entries = []
-            for key, value in string_entries:
-                orig = baseline.get(key, value) if baseline else value
-                baseline_entries.append((key, orig))
-
-            self._project = TranslationProject()
-            self._project.create_from_paloc(baseline_entries, source_code, target_code, filename)
-
-            # Merge saved translations back
             restored = 0
-            for entry in self._project.entries:
-                saved = saved_translations.get(entry.key)
-                if saved:
-                    entry.edit_translation(saved["text"])
-                    entry.status = saved["status"]
-                    entry.ai_provider = saved.get("provider", "")
-                    entry.ai_model = saved.get("model", "")
-                    restored += 1
+            merge = {"new": 0, "changed": 0, "removed": 0}
+            if saved_project is not None:
+                self._project = saved_project
+                if target_code and self._project.target_lang != target_code:
+                    self._project.target_lang = target_code
+                merge = self._merge_with_fresh_game_data(build_info=build_info)
+                restored = sum(1 for entry in self._project.entries if entry.translated_text.strip())
+            else:
+                self._project = TranslationProject()
+                self._project.create_from_paloc(
+                    string_entries,
+                    source_code,
+                    target_code,
+                    filename,
+                    game_build_id=build_info.get("build_id", ""),
+                    game_build_display=build_info.get("build_display", ""),
+                    game_fingerprint=build_info.get("fingerprint", ""),
+                )
+                self._project.record_sync_summary({
+                    "version": build_info.get("build_id", ""),
+                    "display": build_info.get("build_display", ""),
+                    "new": 0,
+                    "changed": 0,
+                    "removed": 0,
+                })
 
             self._apply_usage_tags(rebuild=True)
             self._reload_table()
             self._autosave.set_project(self._project)
             self._autosave.start()
             self._update_stats()
+            self._update_game_header()
+            self._update_sync_summary_label()
 
             status_msg = f"Loaded {len(string_entries)} strings from {filename}"
             if restored > 0:
                 status_msg += f" ({restored} translations restored)"
+            total_changes = merge["new"] + merge["changed"] + merge["removed"]
+            if total_changes > 0:
+                parts = []
+                if merge["new"]:
+                    parts.append(f"+{merge['new']:,} new")
+                if merge["changed"]:
+                    parts.append(f"~{merge['changed']:,} changed")
+                if merge["removed"]:
+                    parts.append(f"-{merge['removed']:,} removed")
+                status_msg += f" | Synced: {', '.join(parts)}"
             self._progress.set_progress(100, status_msg)
         except Exception as e:
             show_error(self, "Load Error", f"Failed to load paloc from game archives: {e}")
@@ -758,11 +883,26 @@ class TranslateTab(QWidget):
         try:
             self._project = TranslationProject()
             self._project.load(path)
+            merge = self._merge_with_fresh_game_data()
             self._apply_usage_tags(rebuild=True)
             self._reload_table()
             self._autosave.set_project(self._project)
             self._autosave.start()
-            self._progress.set_status(f"Loaded project: {self._project.entry_count} strings")
+            self._update_stats()
+            self._update_game_header()
+            self._update_sync_summary_label()
+
+            parts = []
+            if merge["new"]:
+                parts.append(f"+{merge['new']:,} new")
+            if merge["changed"]:
+                parts.append(f"~{merge['changed']:,} changed")
+            if merge["removed"]:
+                parts.append(f"-{merge['removed']:,} removed")
+            suffix = f" | Synced: {', '.join(parts)}" if parts else ""
+            self._progress.set_status(
+                f"Loaded project: {self._project.entry_count} strings{suffix}"
+            )
         except Exception as e:
             show_error(self, "Load Error", f"Failed to load project: {e}")
 
@@ -1328,6 +1468,7 @@ class TranslateTab(QWidget):
             self._badge_translated.setText("◆  Translated: 0")
             self._badge_reviewed.setText("★  Reviewed: 0")
             self._badge_approved.setText("✔  Approved: 0")
+            self._update_sync_summary_label()
             return
 
         stats = self._project.get_stats()
@@ -1362,6 +1503,8 @@ class TranslateTab(QWidget):
                 "color: #a6e3a1; background: #1e1e2e;"
                 "border-radius: 4px; padding: 1px 8px;"
             )
+
+        self._update_sync_summary_label()
 
     def _export_json(self):
         """Export translations to JSON for external editing."""
@@ -1487,10 +1630,70 @@ class TranslateTab(QWidget):
             options.append((f"{category} ({counts.get(category, 0):,})", category))
         return options
 
+    def _build_version_filter_options(self) -> list[tuple[str, str]]:
+        options = [("All Versions", "__all__")]
+        if not self._project.entries:
+            return options
+
+        version_counts: dict[str, dict[str, int]] = {}
+        for entry in self._project.entries:
+            for event in getattr(entry, "game_event_history", []) or []:
+                version = event.get("version", "")
+                kind = event.get("kind", "")
+                if not version:
+                    continue
+                bucket = version_counts.setdefault(
+                    version,
+                    {"baseline": 0, "added": 0, "changed": 0, "removed": 0},
+                )
+                if kind in bucket:
+                    bucket[kind] += 1
+
+        if not version_counts:
+            return options
+
+        display_map = {
+            item.get("version", ""): item.get("display", item.get("version", ""))
+            for item in self._project.update_history
+            if item.get("version")
+        }
+        if self._project.game_build_id:
+            display_map.setdefault(
+                self._project.game_build_id,
+                self._project.game_build_display or self._project.game_build_id,
+            )
+
+        ordered_versions: list[str] = []
+        for item in self._project.update_history:
+            version = item.get("version", "")
+            if version and version in version_counts and version not in ordered_versions:
+                ordered_versions.append(version)
+        for version in version_counts:
+            if version not in ordered_versions:
+                ordered_versions.append(version)
+
+        for version in reversed(ordered_versions):
+            counts = version_counts.get(version, {})
+            summary_parts = []
+            if counts.get("added", 0):
+                summary_parts.append(f"+{counts['added']:,}")
+            if counts.get("changed", 0):
+                summary_parts.append(f"~{counts['changed']:,}")
+            if counts.get("removed", 0):
+                summary_parts.append(f"-{counts['removed']:,}")
+            if counts.get("baseline", 0) and not summary_parts:
+                summary_parts.append(f"{counts['baseline']:,} tracked")
+            label = display_map.get(version, version)
+            if summary_parts:
+                label = f"{label} ({', '.join(summary_parts)})"
+            options.append((label, version))
+        return options
+
     def _reload_table(self) -> None:
         self._table.load_entries(
             self._project.entries,
             self._build_usage_filter_options(),
+            self._build_version_filter_options(),
         )
 
     def save_state(self) -> None:
@@ -1533,6 +1736,12 @@ class TranslateTab(QWidget):
                     if self._source_combo.itemText(i) == source_text:
                         self._source_combo.setCurrentIndex(i)
                         break
+            elif self._project.source_file:
+                for i in range(self._source_combo.count()):
+                    paloc_info = self._source_combo.itemData(i)
+                    if paloc_info and paloc_info.get("filename") == self._project.source_file:
+                        self._source_combo.setCurrentIndex(i)
+                        break
 
             target_idx = ui_state.get("target_combo_index", -1)
             target_lang = ui_state.get("target_lang", "")
@@ -1553,7 +1762,7 @@ class TranslateTab(QWidget):
 
             # Always merge with fresh game data to pick up new entries,
             # parser improvements, or game patches.
-            saved_fp = ui_state.get("game_fingerprint", "")
+            saved_fp = self._project.game_fingerprint or ui_state.get("game_fingerprint", "")
             current_fp = self._get_game_fingerprint()
             is_game_update = bool(saved_fp and current_fp and saved_fp != current_fp)
 
@@ -1570,6 +1779,10 @@ class TranslateTab(QWidget):
                 lines = []
                 if is_game_update:
                     lines.append("The game was updated since your last session.\n")
+                if merge.get("previous_display"):
+                    lines.append(f"Previous build: {merge['previous_display']}")
+                if merge.get("display"):
+                    lines.append(f"Current build: {merge['display']}\n")
                 lines.append(f"Game file: {merge['total_fresh']:,} entries")
                 lines.append(f"Your project: {merge['total_saved']:,} entries\n")
                 if merge["new"]:
@@ -1584,12 +1797,22 @@ class TranslateTab(QWidget):
                         lines.append(f"  [{key}]")
                         lines.append(f"    was: {old}")
                         lines.append(f"    now: {new}")
+                if merge.get("new_samples"):
+                    lines.append("\nNew key samples:")
+                    for key in merge["new_samples"]:
+                        lines.append(f"  + {key}")
+                if merge.get("removed_samples"):
+                    lines.append("\nRemoved key samples:")
+                    for key in merge["removed_samples"]:
+                        lines.append(f"  - {key}")
                 lines.append("\nYour translations are preserved.")
                 show_info(self, title, "\n".join(lines))
 
             self._apply_usage_tags(rebuild=True)
             self._reload_table()
             self._update_stats()
+            self._update_game_header()
+            self._update_sync_summary_label()
             self._autosave.set_project(self._project)
             self._autosave.start()
 
@@ -1617,24 +1840,89 @@ class TranslateTab(QWidget):
 
     def _get_game_fingerprint(self) -> str:
         """Get a fingerprint of the current game version using PAPGT CRC."""
-        try:
-            import struct
-            from core.checksum_engine import pa_checksum
-            game_path = self._config.get("general.last_game_path", "")
-            if not game_path:
-                return ""
-            papgt_path = os.path.join(game_path, "meta", "0.papgt")
-            if not os.path.isfile(papgt_path):
-                return ""
-            with open(papgt_path, "rb") as f:
-                data = f.read()
-            crc = pa_checksum(data[12:])
-            size = os.path.getsize(papgt_path)
-            return f"{crc:08X}_{size}"
-        except Exception:
-            return ""
+        return self._get_game_build_info().get("fingerprint", "")
 
-    def _merge_with_fresh_game_data(self) -> dict:
+    def _looks_like_legacy_single_build_history(self, current_build_id: str) -> bool:
+        """Detect old projects that were bootstrapped into a single baseline build."""
+        if not self._project.entries:
+            return False
+
+        history_versions = set()
+        for entry in self._project.entries:
+            history = list(getattr(entry, "game_event_history", []) or [])
+            if len(history) > 1:
+                return False
+            if history:
+                event = history[0]
+                if event.get("kind") != "baseline":
+                    return False
+                version = event.get("version", "")
+                if version:
+                    history_versions.add(version)
+
+        if len(history_versions) > 1:
+            return False
+        only_version = next(iter(history_versions), "")
+        if current_build_id and only_version and only_version != current_build_id:
+            return False
+
+        for item in self._project.update_history:
+            if any(int(item.get(key, 0)) > 0 for key in ("new", "changed", "removed")):
+                return False
+        return True
+
+    def _bootstrap_legacy_version_history(self, current_build_id: str, current_display: str) -> dict:
+        """Infer a practical version history for pre-feature projects.
+
+        All existing entries become the original legacy baseline.
+        Pending entries are treated as the current update bucket so they are easy to review.
+        """
+        if not self._project.entries:
+            return {"new": 0, "legacy_version": "", "legacy_display": ""}
+
+        legacy_display = (
+            f"Before {current_display}"
+            if current_display
+            else "Legacy Project Baseline"
+        )
+        legacy_version = (
+            f"legacy-before:{current_build_id}"
+            if current_build_id
+            else "legacy-baseline"
+        )
+
+        pending_count = 0
+        for entry in self._project.entries:
+            entry.game_event_history = []
+            entry.game_introduced_version = ""
+            entry.game_last_seen_version = ""
+            entry.game_last_changed_version = ""
+            entry.game_removed_in_version = ""
+            entry.game_sync_state = ""
+            entry.record_game_event(legacy_version, "baseline")
+            if current_build_id and entry.status == StringStatus.PENDING and not entry.locked:
+                entry.record_game_event(current_build_id, "added", "legacy pending migration")
+                pending_count += 1
+
+        self._project.record_sync_summary({
+            "version": legacy_version,
+            "display": legacy_display,
+            "new": 0,
+            "changed": 0,
+            "removed": 0,
+        })
+        logger.info(
+            "Bootstrapped legacy translation history: %d baseline entries, %d current-update pending entries",
+            len(self._project.entries),
+            pending_count,
+        )
+        return {
+            "new": pending_count,
+            "legacy_version": legacy_version,
+            "legacy_display": legacy_display,
+        }
+
+    def _merge_with_fresh_game_data(self, build_info: dict | None = None) -> dict:
         """Merge saved translations with fresh game paloc data.
 
         Reads the current game paloc, compares with saved project:
@@ -1645,8 +1933,27 @@ class TranslateTab(QWidget):
         Returns a dict with: new, changed, removed, total_fresh, total_saved,
         changed_samples (list of (key, old_text, new_text) up to 5).
         """
-        empty = {"new": 0, "changed": 0, "removed": 0,
-                 "total_fresh": 0, "total_saved": 0, "changed_samples": []}
+        build_info = build_info or self._get_game_build_info()
+        current_build_id = build_info.get("build_id", "")
+        current_display = build_info.get("build_display", current_build_id)
+        current_fingerprint = build_info.get("fingerprint", "")
+        previous_display = self._project.game_build_display
+        previous_version = self._project.game_build_id
+
+        empty = {
+            "version": current_build_id,
+            "display": current_display,
+            "previous_version": previous_version,
+            "previous_display": previous_display,
+            "new": 0,
+            "changed": 0,
+            "removed": 0,
+            "total_fresh": 0,
+            "total_saved": 0,
+            "changed_samples": [],
+            "new_samples": [],
+            "removed_samples": [],
+        }
 
         if not self._vfs or not self._discovered_palocs or not self._project.entries:
             return empty
@@ -1682,20 +1989,59 @@ class TranslateTab(QWidget):
             logger.warning("Failed to read fresh paloc for merge: %s", ex)
             return empty
 
+        self._baseline_mgr.merge_into_baseline(
+            source_file,
+            list(fresh_map.items()),
+            paloc_info.get("lang_code", self._project.source_lang),
+            build_id=current_build_id,
+            build_display=current_display,
+            game_fingerprint=current_fingerprint,
+        )
+
         # Build map of existing translations
         existing_map = {e.key: e for e in self._project.entries}
+        legacy_bootstrap = {"new": 0, "legacy_version": "", "legacy_display": ""}
+        if self._looks_like_legacy_single_build_history(current_build_id):
+            legacy_bootstrap = self._bootstrap_legacy_version_history(
+                current_build_id,
+                current_display,
+            )
+            if legacy_bootstrap.get("legacy_version"):
+                previous_version = legacy_bootstrap["legacy_version"]
+            if legacy_bootstrap.get("legacy_display"):
+                previous_display = legacy_bootstrap["legacy_display"]
 
         result = {
-            "new": 0, "changed": 0, "removed": 0,
+            "version": current_build_id,
+            "display": current_display,
+            "previous_version": previous_version,
+            "previous_display": previous_display,
+            "new": int(legacy_bootstrap.get("new", 0)),
+            "changed": 0,
+            "removed": 0,
             "total_fresh": len(fresh_map),
             "total_saved": len(existing_map),
             "changed_samples": [],
+            "new_samples": [],
+            "removed_samples": [],
         }
+
+        bootstrap_version = self._project.game_build_id or current_build_id
+        bootstrap_display = self._project.game_build_display or current_display
+        for entry in self._project.entries:
+            entry.clear_game_sync_state()
+            if not entry.game_event_history and bootstrap_version:
+                entry.game_last_seen_version = entry.game_last_seen_version or bootstrap_version
+                entry.record_game_event(bootstrap_version, "baseline")
 
         # Update existing entries with fresh original text
         for entry in self._project.entries:
             if entry.key in fresh_map:
                 fresh_text = fresh_map[entry.key]
+                if current_build_id:
+                    entry.game_last_seen_version = current_build_id
+                if entry.game_removed_in_version and current_build_id:
+                    entry.record_game_event(current_build_id, "added", "reintroduced")
                 if fresh_text != entry.original_text:
                     if len(result["changed_samples"]) < 5:
                         old_preview = entry.original_text[:60]
@@ -1704,11 +2050,17 @@ class TranslateTab(QWidget):
                     entry.original_text = fresh_text
                     if entry.translated_text and entry.status != StringStatus.PENDING:
                         entry.status = StringStatus.TRANSLATED  # needs re-review
+                    if current_build_id:
+                        entry.record_game_event(current_build_id, "changed")
                     result["changed"] += 1
 
         # Count removed entries (in saved project but not in fresh game)
-        for key in existing_map:
+        for key, entry in existing_map.items():
             if key not in fresh_map:
+                if len(result["removed_samples"]) < 5:
+                    result["removed_samples"].append(key)
+                if current_build_id:
+                    entry.record_game_event(current_build_id, "removed")
                 result["removed"] += 1
 
         # Add new entries from game
@@ -1731,6 +2083,11 @@ class TranslateTab(QWidget):
                     entry.status = StringStatus.APPROVED
                     entry.locked = True
                     entry.notes = "auto-locked: untranslatable"
+                if current_build_id:
+                    entry.game_last_seen_version = current_build_id
+                    entry.record_game_event(current_build_id, "added")
+                if len(result["new_samples"]) < 5:
+                    result["new_samples"].append(key)
                 new_entries.append(entry)
                 result["new"] += 1
 
@@ -1739,13 +2096,21 @@ class TranslateTab(QWidget):
             self._project._rebuild_index_map()
 
         total_changes = result["new"] + result["changed"] + result["removed"]
+        if current_build_id:
+            self._project.set_game_build(
+                current_build_id,
+                current_display,
+                current_fingerprint,
+            )
+            self._project.record_sync_summary(result)
         if total_changes > 0:
             self._project.mark_modified()
-            logger.info(
-                "Fresh merge: %d new, %d changed, %d removed (fresh=%d, saved=%d)",
-                result["new"], result["changed"], result["removed"],
-                result["total_fresh"], result["total_saved"],
-            )
+        logger.info(
+            "Fresh merge [%s]: %d new, %d changed, %d removed (fresh=%d, saved=%d)",
+            current_display or "unknown build",
+            result["new"], result["changed"], result["removed"],
+            result["total_fresh"], result["total_saved"],
+        )
 
         return result
 

@@ -33,6 +33,12 @@ class TranslationEntry:
     manually_edited: bool = False
     locked: bool = False
     notes: str = ""
+    game_introduced_version: str = ""
+    game_last_seen_version: str = ""
+    game_last_changed_version: str = ""
+    game_removed_in_version: str = ""
+    game_sync_state: str = ""
+    game_event_history: list[dict] = field(default_factory=list)
 
     def set_translated(self, text: str, provider: str = "", model: str = "",
                        tokens: int = 0, cost: float = 0.0) -> None:
@@ -76,6 +82,41 @@ class TranslationEntry:
         if self.status == StringStatus.APPROVED:
             self.status = StringStatus.REVIEWED
 
+    def record_game_event(self, version: str, kind: str, details: str = "") -> None:
+        """Record a game-text lifecycle event for version-aware filtering."""
+        if not version or not kind:
+            return
+
+        event = {"version": version, "kind": kind}
+        if details:
+            event["details"] = details
+
+        if self.game_event_history:
+            last = self.game_event_history[-1]
+            if (
+                last.get("version") == version
+                and last.get("kind") == kind
+                and last.get("details", "") == details
+            ):
+                self.game_sync_state = kind
+                return
+
+        self.game_event_history.append(event)
+        self.game_sync_state = kind
+
+        if kind in ("baseline", "added") and not self.game_introduced_version:
+            self.game_introduced_version = version
+        if kind == "changed":
+            self.game_last_changed_version = version
+            self.game_removed_in_version = ""
+        elif kind == "removed":
+            self.game_removed_in_version = version
+        elif kind in ("baseline", "added"):
+            self.game_removed_in_version = ""
+
+    def clear_game_sync_state(self) -> None:
+        self.game_sync_state = ""
+
     def to_dict(self) -> dict:
         return {
             "index": self.index,
@@ -91,6 +132,12 @@ class TranslationEntry:
             "manually_edited": self.manually_edited,
             "locked": self.locked,
             "notes": self.notes,
+            "game_introduced_version": self.game_introduced_version,
+            "game_last_seen_version": self.game_last_seen_version,
+            "game_last_changed_version": self.game_last_changed_version,
+            "game_removed_in_version": self.game_removed_in_version,
+            "game_sync_state": self.game_sync_state,
+            "game_event_history": list(self.game_event_history),
         }
 
     @classmethod
@@ -108,6 +155,12 @@ class TranslationEntry:
             manually_edited=data.get("manually_edited", False),
             locked=data.get("locked", False),
             notes=data.get("notes", ""),
+            game_introduced_version=data.get("game_introduced_version", ""),
+            game_last_seen_version=data.get("game_last_seen_version", ""),
+            game_last_changed_version=data.get("game_last_changed_version", ""),
+            game_removed_in_version=data.get("game_removed_in_version", ""),
+            game_sync_state=data.get("game_sync_state", ""),
+            game_event_history=list(data.get("game_event_history", [])),
         )
         status_str = data.get("status", "pending")
         entry.status = StringStatus(status_str)

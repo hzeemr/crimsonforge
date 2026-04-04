@@ -17,11 +17,38 @@ VERSION BUMPING RULES
 __all__ = ["APP_VERSION", "APP_NAME", "CHANGELOG"]
 
 APP_NAME = "CrimsonForge"
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.12.0"
 
 # Each entry: (version, date, list_of_changes)
 # Newest first. `date` is YYYY-MM-DD.
 CHANGELOG: list[tuple[str, str, list[str]]] = [
+    (
+        "1.12.0", "2026-04-04", [
+            # Explorer / Mesh Ship to App
+            "[Feature] Explorer Ship to App: selected .pac, .pam, and .pamlod meshes can now be packaged as standalone ZIP installers for end users",
+            "[Feature] Mesh Ship builder: edited OBJ files now rebuild mesh binaries, patch PAZ/PAMT/PAPGT fully in memory, and generate install.bat, uninstall.bat, README.txt, and manifest.json",
+            "[Feature] Explorer mesh context menu now includes 'Import OBJ + Ship to App' for direct one-asset packaging from the file browser",
+            "[Enhancement] Explorer mesh shipping dialog now supports multi-asset packaging with per-asset OBJ assignment, reusable metadata fields, and paired .pamlod auto-generation for edited .pam meshes",
+            "[Enhancement] Explorer now remembers the last imported OBJ per mesh during the session so packaging workflows can prefill the edited source path automatically",
+            "[Enhancement] Explorer mesh Ship to App now resolves real in-game item names for default mod titles when an item mapping exists, such as weapon and armor names from game data",
+            "[Fix] Explorer mesh Ship to App metadata fields are now fully editable so mod name, author, and version can be customized before packaging",
+            "[Fix] Mesh distribution packages now always include the full enterprise-safe patched set: PAZ payload, package PAMT index, and meta PAPGT checksum root",
+
+            # Translate / Version Tracking
+            "[Feature] Translate tab now tracks text updates by exact game build using meta/0.paver + PAPGT CRC instead of only a coarse session fingerprint",
+            "[Feature] Per-entry game history is now stored for baseline, added, changed, and removed text events, enabling version-aware filtering inside the translation table",
+            "[Feature] Translate table now supports enterprise version filtering: filter entries by tracked game build and by change type (Added, Changed, Removed, Baseline)",
+            "[Feature] Translate status bar now shows the latest text-sync build and update summary so new strings and source-text changes are visible immediately after game updates",
+            "[Enhancement] Restore, project load, and source-language load now all sync against fresh live game text using the same version-aware merge pipeline",
+            "[Enhancement] Game-update sync popups now show previous build, current build, changed text samples, and sample new/removed keys for faster review triage",
+            "[Enhancement] Legacy autosave projects are now migrated into enterprise version tracking automatically: existing entries become the original baseline and current pending entries are grouped into the latest update bucket",
+            "[Fix] Translation baselines now preserve the original first-seen text and only extend with newly discovered keys on later updates instead of overwriting the baseline snapshot each time",
+
+            # Stability / Static Mesh / Preview
+            "[Fix] DDS preview now safely rejects truncated bogus uncompressed decodes and falls back cleanly instead of crashing when browsing problematic files like 03_cube_sp.dds",
+            "[Fix] Full PAM topology rebuild now also synchronizes mirrored header metadata blocks, preventing stale static-mesh counts that could cause in-game crashes after adding geometry",
+        ],
+    ),
     (
         "1.11.0", "2026-04-04", [
             # ── Explorer / Mesh Editing / Search ──

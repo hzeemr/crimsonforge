@@ -30,7 +30,7 @@ from ui.widgets.preview_pane import PreviewPane
 from ui.widgets.search_history_line_edit import SearchHistoryLineEdit
 from ui.widgets.syntax_editor import SyntaxEditor
 from ui.widgets.progress_widget import ProgressWidget
-from ui.dialogs.file_picker import pick_directory, pick_save_file
+from ui.dialogs.file_picker import pick_directory, pick_file, pick_save_file
 from ui.dialogs.confirmation import show_error, show_info, confirm_action
 from utils.thread_worker import FunctionWorker
 from utils.platform_utils import format_file_size
@@ -300,6 +300,7 @@ class ExplorerTab(QWidget):
         self._worker: FunctionWorker = None
         self._item_index = None
         self._current_edit_file = ""
+        self._pending_mesh_data: dict[str, dict] = {}
         self._temp_dir = tempfile.mkdtemp(prefix="crimsonforge_preview_")
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -374,6 +375,15 @@ class ExplorerTab(QWidget):
         self._extract_all_btn.setToolTip("Extract all visible (filtered) files to the output directory.")
         self._extract_all_btn.clicked.connect(self._extract_all)
         toolbar.addWidget(self._extract_all_btn)
+        self._ship_mesh_btn = QPushButton("Ship to App")
+        self._ship_mesh_btn.setObjectName("primary")
+        self._ship_mesh_btn.setToolTip(
+            "Generate a standalone ZIP installer for selected mesh mods.\n"
+            "Select one or more .pac, .pam, or .pamlod rows, assign edited OBJ files,\n"
+            "and package the patched PAZ/PAMT/PAPGT files for end users."
+        )
+        self._ship_mesh_btn.clicked.connect(self._ship_selected_meshes)
+        toolbar.addWidget(self._ship_mesh_btn)
         layout.addLayout(toolbar)
 
         main_splitter = QSplitter(Qt.Horizontal)
@@ -665,6 +675,8 @@ class ExplorerTab(QWidget):
                     import_act.triggered.connect(lambda _=False, e=entry: self._import_mesh(e))
                     patch_act = menu.addAction("Import OBJ + Patch to Game")
                     patch_act.triggered.connect(lambda _=False, e=entry: self._import_and_patch_mesh(e))
+                    ship_act = menu.addAction("Import OBJ + Ship to App")
+                    ship_act.triggered.connect(lambda _=False, e=entry: self._ship_single_mesh(e))
 
         # Audio export/import for audio files
         if click_index.isValid():
@@ -867,7 +879,6 @@ class ExplorerTab(QWidget):
 
     def _import_mesh(self, entry: PamtFileEntry):
         """Import an OBJ file, rebuild the mesh, and preview the result."""
-        from ui.dialogs.file_picker import pick_file
         obj_path = pick_file(self, "Select OBJ File", filters="OBJ Files (*.obj);;All Files (*.*)")
         if not obj_path:
             return
@@ -901,10 +912,11 @@ class ExplorerTab(QWidget):
             self._preview.preview_file(temp_path)
 
             # Store for potential patching
-            self._pending_mesh_data = {
+            self._pending_mesh_data[entry.path.lower()] = {
                 "entry": entry,
                 "new_data": new_data,
                 "imported": imported,
+                "obj_path": obj_path,
             }
 
             self._progress.set_status(
@@ -928,7 +940,6 @@ class ExplorerTab(QWidget):
 
     def _import_and_patch_mesh(self, entry: PamtFileEntry):
         """Import OBJ, rebuild binary, and patch directly into the game."""
-        from ui.dialogs.file_picker import pick_file
         obj_path = pick_file(self, "Select OBJ File", filters="OBJ Files (*.obj);;All Files (*.*)")
         if not obj_path:
             return
@@ -953,6 +964,12 @@ class ExplorerTab(QWidget):
 
             # Build new binary
             new_data = build_mesh(imported, original_data)
+            self._pending_mesh_data[entry.path.lower()] = {
+                "entry": entry,
+                "new_data": new_data,
+                "imported": imported,
+                "obj_path": obj_path,
+            }
 
             # Find which package group this entry belongs to
             paz_dir = os.path.basename(os.path.dirname(entry.paz_file))
@@ -1166,3 +1183,65 @@ class ExplorerTab(QWidget):
 
     def set_root_path(self, path: str):
         self._output_path.setText(path)
+
+    def _get_selected_mesh_entries(self) -> list[PamtFileEntry]:
+        from core.mesh_parser import is_mesh_file
+
+        result = []
+        seen = set()
+        for row in self._get_selected_rows():
+            row_data = self._model.row_at(row)
+            if not row_data or not is_mesh_file(row_data.entry.path):
+                continue
+            key = row_data.entry.path.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(row_data.entry)
+        return result
+
+    def _ship_selected_meshes(self):
+        if not self._vfs:
+            show_error(self, "Ship to App", "Load the game data first.")
+            return
+
+        entries = self._get_selected_mesh_entries()
+        if not entries:
+            show_error(
+                self,
+                "Ship to App",
+                "Select one or more .pac, .pam, or .pamlod rows in Explorer first.",
+            )
+            return
+
+        prefilled = {}
+        for entry in entries:
+            pending = self._pending_mesh_data.get(entry.path.lower())
+            if pending and pending.get("obj_path"):
+                prefilled[entry.path.lower()] = pending["obj_path"]
+
+        from ui.dialogs.ship_mesh_dialog import ShipMeshDialog
+
+        dlg = ShipMeshDialog(self._vfs, self._config, entries, prefilled, self._item_index, self)
+        dlg.exec()
+
+    def _ship_single_mesh(self, entry: PamtFileEntry):
+        if not self._vfs:
+            show_error(self, "Ship to App", "Load the game data first.")
+            return
+
+        obj_path = pick_file(self, "Select OBJ File", filters="OBJ Files (*.obj);;All Files (*.*)")
+        if not obj_path:
+            return
+
+        from ui.dialogs.ship_mesh_dialog import ShipMeshDialog
+
+        dlg = ShipMeshDialog(
+            self._vfs,
+            self._config,
+            [entry],
+            {entry.path.lower(): obj_path},
+            self._item_index,
+            self,
+        )
+        dlg.exec()

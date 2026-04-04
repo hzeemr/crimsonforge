@@ -490,8 +490,12 @@ class PreviewPane(QWidget):
                 data = f.read()
 
             w, h, rgba = decode_dds_to_rgba(data)
+            if len(rgba) < w * h * 4:
+                return QPixmap()
             img = QImage(rgba, w, h, w * 4, QImage.Format_RGBA8888)
-            return QPixmap.fromImage(img)
+            if img.isNull():
+                return QPixmap()
+            return QPixmap.fromImage(img.copy())
         except Exception:
             return QPixmap()
 

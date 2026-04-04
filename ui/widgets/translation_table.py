@@ -54,6 +54,19 @@ COLUMN_COUNT = 4
 COLUMN_HEADERS = ["#", "Original", "Translation", "Status"]
 USAGE_FILTER_ALL = "All"
 USAGE_FILTER_UNCATEGORIZED = "Uncategorized"
+VERSION_FILTER_ALL = "__all__"
+CHANGE_FILTER_ALL = "All Changes"
+CHANGE_FILTER_ADDED = "Added"
+CHANGE_FILTER_CHANGED = "Changed"
+CHANGE_FILTER_REMOVED = "Removed"
+CHANGE_FILTER_BASELINE = "Baseline"
+CHANGE_FILTER_OPTIONS = (
+    CHANGE_FILTER_ALL,
+    CHANGE_FILTER_ADDED,
+    CHANGE_FILTER_CHANGED,
+    CHANGE_FILTER_REMOVED,
+    CHANGE_FILTER_BASELINE,
+)
 SEARCHABLE_FIELDS = ("key", "original", "translation", "usage", "status", "notes")
 SEARCH_FIELD_ALIASES = {
     "key": "key",
@@ -232,6 +245,8 @@ class _TranslationModel(QAbstractTableModel):
         self._filtered: list[TranslationEntry] = []
         self._status_filter = "All"
         self._category_filter = USAGE_FILTER_ALL
+        self._version_filter = VERSION_FILTER_ALL
+        self._change_filter = CHANGE_FILTER_ALL
         self._search_text = ""
         self._search_query = _SearchQuery()
         self._search_doc_cache: dict[int, _SearchDocument] = {}
@@ -243,10 +258,19 @@ class _TranslationModel(QAbstractTableModel):
         self._refilter()
         self.endResetModel()
 
-    def set_filter(self, status: str, search: str, category: str):
+    def set_filter(
+        self,
+        status: str,
+        search: str,
+        category: str,
+        version: str = VERSION_FILTER_ALL,
+        change: str = CHANGE_FILTER_ALL,
+    ):
         self.beginResetModel()
         self._status_filter = status
         self._category_filter = category or USAGE_FILTER_ALL
+        self._version_filter = version or VERSION_FILTER_ALL
+        self._change_filter = change or CHANGE_FILTER_ALL
         self._search_text = search.strip()
         self._search_query = _parse_search_query(self._search_text)
         self._refilter()
@@ -266,6 +290,8 @@ class _TranslationModel(QAbstractTableModel):
                 e for e in entries
                 if target_category in (e.usage_tags or [USAGE_FILTER_UNCATEGORIZED])
             ]
+        if self._version_filter != VERSION_FILTER_ALL or self._change_filter != CHANGE_FILTER_ALL:
+            entries = [e for e in entries if self._entry_matches_version_filters(e)]
         if self._search_query.raw:
             scored_entries = []
             for entry in entries:
@@ -308,6 +334,30 @@ class _TranslationModel(QAbstractTableModel):
         )
         self._search_doc_cache[entry.index] = doc
         return doc
+
+    def _entry_matches_version_filters(self, entry: TranslationEntry) -> bool:
+        history = list(getattr(entry, "game_event_history", []) or [])
+        if not history:
+            return False
+
+        filtered = history
+        if self._version_filter != VERSION_FILTER_ALL:
+            filtered = [event for event in filtered if event.get("version") == self._version_filter]
+            if not filtered:
+                return False
+
+        if self._change_filter == CHANGE_FILTER_ALL:
+            return bool(filtered)
+
+        wanted_kind = {
+            CHANGE_FILTER_ADDED: "added",
+            CHANGE_FILTER_CHANGED: "changed",
+            CHANGE_FILTER_REMOVED: "removed",
+            CHANGE_FILTER_BASELINE: "baseline",
+        }.get(self._change_filter, "")
+        if not wanted_kind:
+            return bool(filtered)
+        return any(event.get("kind") == wanted_kind for event in filtered)
 
     def _score_entry(self, entry: TranslationEntry) -> int:
         query = self._search_query
@@ -579,6 +629,34 @@ class TranslationTableWidget(QWidget):
         self._usage_filter.currentIndexChanged.connect(self._schedule_filter)
         filter_row.addWidget(self._usage_filter)
 
+        version_label = QLabel("Version:")
+        version_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #a6adc8;")
+        filter_row.addWidget(version_label)
+        self._version_filter = QComboBox()
+        self._version_filter.addItem("All Versions", VERSION_FILTER_ALL)
+        self._version_filter.setToolTip(
+            "Filter entries by the game version where they were first tracked,\n"
+            "added, changed, or removed."
+        )
+        self._version_filter.setMinimumWidth(180)
+        self._version_filter.currentIndexChanged.connect(self._schedule_filter)
+        filter_row.addWidget(self._version_filter)
+
+        change_label = QLabel("Change:")
+        change_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #a6adc8;")
+        filter_row.addWidget(change_label)
+        self._change_filter = QComboBox()
+        for option in CHANGE_FILTER_OPTIONS:
+            self._change_filter.addItem(option, option)
+        self._change_filter.setToolTip(
+            "Filter version history by change type.\n"
+            "Added = new keys, Changed = source text changed,\n"
+            "Removed = no longer in game, Baseline = first tracked build."
+        )
+        self._change_filter.setFixedWidth(120)
+        self._change_filter.currentIndexChanged.connect(self._schedule_filter)
+        filter_row.addWidget(self._change_filter)
+
         self._search_input = SearchHistoryLineEdit(self._config, "translate")
         self._search_input.setPlaceholderText(
             'Search: text, key:quest*, {*}, locked:yes, empty:yes ...'
@@ -682,9 +760,12 @@ class TranslationTableWidget(QWidget):
         self,
         entries: list[TranslationEntry],
         usage_filter_options: list[tuple[str, str]] | None = None,
+        version_filter_options: list[tuple[str, str]] | None = None,
     ) -> None:
         if usage_filter_options is not None:
             self.set_usage_filter_options(usage_filter_options)
+        if version_filter_options is not None:
+            self.set_version_filter_options(version_filter_options)
         self._model.set_entries(entries)
         self._update_count()
 
@@ -703,6 +784,21 @@ class TranslationTableWidget(QWidget):
             self._usage_filter.setCurrentIndex(restore_index)
         self._usage_filter.blockSignals(False)
 
+    def set_version_filter_options(self, options: list[tuple[str, str]]) -> None:
+        current_value = self._version_filter.currentData() or VERSION_FILTER_ALL
+        self._version_filter.blockSignals(True)
+        self._version_filter.clear()
+        for label, value in options:
+            self._version_filter.addItem(label, value)
+        restore_index = self._version_filter.findData(current_value)
+        if restore_index == -1:
+            restore_index = self._version_filter.findData(VERSION_FILTER_ALL)
+        if restore_index == -1 and self._version_filter.count():
+            restore_index = 0
+        if restore_index != -1:
+            self._version_filter.setCurrentIndex(restore_index)
+        self._version_filter.blockSignals(False)
+
     def _schedule_filter(self):
         self._filter_timer.start()
 
@@ -710,7 +806,9 @@ class TranslationTableWidget(QWidget):
         status = self._status_filter.currentText()
         search = self._search_input.text()
         category = self._usage_filter.currentData() or USAGE_FILTER_ALL
-        self._model.set_filter(status, search, category)
+        version = self._version_filter.currentData() or VERSION_FILTER_ALL
+        change = self._change_filter.currentData() or CHANGE_FILTER_ALL
+        self._model.set_filter(status, search, category, version, change)
         self._update_count()
 
     def _update_count(self):
@@ -990,6 +1088,8 @@ class TranslationTableWidget(QWidget):
         return {
             "status": self._status_filter.currentText(),
             "usage": self._usage_filter.currentData() or USAGE_FILTER_ALL,
+            "version": self._version_filter.currentData() or VERSION_FILTER_ALL,
+            "change": self._change_filter.currentData() or CHANGE_FILTER_ALL,
             "search": self._search_input.text().strip(),
         }
 
