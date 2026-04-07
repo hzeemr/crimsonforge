@@ -12,6 +12,7 @@ lists, Qt only asks for visible rows). No QTreeWidgetItem objects.
 
 import os
 import tempfile
+import time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QSplitter, QTableView, QHeaderView,
@@ -31,6 +32,7 @@ from ui.widgets.search_history_line_edit import SearchHistoryLineEdit
 from ui.widgets.syntax_editor import SyntaxEditor
 from ui.widgets.progress_widget import ProgressWidget
 from ui.dialogs.file_picker import pick_directory, pick_file, pick_save_file
+from ui.dialogs.explorer_workbench_dialog import ExplorerWorkbenchDialog
 from ui.dialogs.confirmation import show_error, show_info, confirm_action
 from utils.thread_worker import FunctionWorker
 from utils.platform_utils import format_file_size
@@ -124,6 +126,7 @@ class _ArchiveModel(QAbstractTableModel):
         self._filtered: list[int] = []
         self._ext_set: set = set()
         self._search_text = ""
+        self._scoped_paths: set[str] | None = None
 
     def set_data(self, rows: list[_ArchiveRow]):
         self.beginResetModel()
@@ -138,11 +141,21 @@ class _ArchiveModel(QAbstractTableModel):
         self._refilter()
         self.endResetModel()
 
+    def set_scope_paths(self, paths: list[str] | set[str] | None):
+        self.beginResetModel()
+        if paths:
+            self._scoped_paths = {path.replace("\\", "/").lower() for path in paths}
+        else:
+            self._scoped_paths = None
+        self._refilter()
+        self.endResetModel()
+
     def _refilter(self):
         import fnmatch as _fn
         ext_set = self._ext_set
         search = self._search_text
-        if not ext_set and not search:
+        scoped_paths = self._scoped_paths
+        if not ext_set and not search and not scoped_paths:
             self._filtered = list(range(len(self._all_rows)))
             return
 
@@ -164,6 +177,8 @@ class _ArchiveModel(QAbstractTableModel):
 
         result = []
         for i, row in enumerate(self._all_rows):
+            if scoped_paths is not None and row.path_lower not in scoped_paths:
+                continue
             if ext_set and row.ext not in ext_set:
                 continue
             if search_ext and row.ext != search_ext:
@@ -302,6 +317,11 @@ class ExplorerTab(QWidget):
         self._current_edit_file = ""
         self._pending_mesh_data: dict[str, dict] = {}
         self._temp_dir = tempfile.mkdtemp(prefix="crimsonforge_preview_")
+        self._last_preview_path = ""
+        self._last_preview_time = 0.0
+        self._active_scope_title = ""
+        self._pending_scope_request: tuple[list[str], str, str] | None = None
+        self._workbench_dialog: ExplorerWorkbenchDialog | None = None
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(250)
@@ -355,6 +375,15 @@ class ExplorerTab(QWidget):
         self._search_input.textChanged.connect(lambda _: self._search_timer.start())
         toolbar.addWidget(self._search_input, 1)
 
+        self._navigator_btn = QPushButton("Navigator")
+        self._navigator_btn.setObjectName("primary")
+        self._navigator_btn.setToolTip(
+            "Open the live character/item/family navigator in a popup.\n"
+            "Use it to filter Explorer to related files while keeping all normal Explorer actions."
+        )
+        self._navigator_btn.clicked.connect(self._open_workbench_dialog)
+        toolbar.addWidget(self._navigator_btn)
+
         toolbar.addWidget(QLabel("Output:"))
         self._output_path = QLineEdit(self._config.get("general.last_output_path", ""))
         self._output_path.setPlaceholderText("Extraction output...")
@@ -397,7 +426,16 @@ class ExplorerTab(QWidget):
         arch_label = QLabel("Archive Contents")
         arch_label.setStyleSheet("font-weight: bold; font-size: 12px; padding: 2px;")
         arch_header.addWidget(arch_label)
+        self._scope_label = QLabel("")
+        self._scope_label.setStyleSheet("color: #f9e2af; font-weight: 600; padding: 0 4px;")
+        self._scope_label.setVisible(False)
+        arch_header.addWidget(self._scope_label)
         arch_header.addStretch()
+        self._clear_scope_btn = QPushButton("Clear Scope")
+        self._clear_scope_btn.setToolTip("Clear the current character/item/family scope and show all matching files again.")
+        self._clear_scope_btn.setVisible(False)
+        self._clear_scope_btn.clicked.connect(self._clear_workbench_scope)
+        arch_header.addWidget(self._clear_scope_btn)
         sel_all_btn = QPushButton("Select All")
         sel_all_btn.setObjectName("primary")
         sel_all_btn.setToolTip("Check all visible files for extraction.")
@@ -504,6 +542,10 @@ class ExplorerTab(QWidget):
         self._vfs = vfs
         self._all_groups = groups
         self._item_index = None
+        self._pending_scope_request = None
+        self._active_scope_title = ""
+        self._model.set_scope_paths(None)
+        self._update_scope_ui()
         self._load_item_index()
         self._group_combo.blockSignals(True)
         self._group_combo.clear()
@@ -512,6 +554,7 @@ class ExplorerTab(QWidget):
         self._group_combo.blockSignals(False)
         self._group_combo.setCurrentText(ALL_PACKAGES)
         self._on_group_changed(ALL_PACKAGES)
+        self._ensure_workbench_dialog().workbench.set_vfs(self._vfs)
         self._progress.set_status(f"Game loaded: {len(groups)} package groups")
 
     def _load_item_index(self) -> None:
@@ -591,6 +634,10 @@ class ExplorerTab(QWidget):
                 rows = [self._build_row(e, group) for e in pamt.file_entries]
                 self._model.set_data(rows)
             self._apply_filter()
+            if group == ALL_PACKAGES and self._pending_scope_request:
+                paths, preferred_path, title = self._pending_scope_request
+                self._pending_scope_request = None
+                self._apply_workbench_scope(paths, preferred_path, title)
         except Exception as e:
             show_error(self, "Load Error", str(e))
 
@@ -620,6 +667,81 @@ class ExplorerTab(QWidget):
         fc = self._model.filtered_count
         tc = self._model.total_count
         self._archive_count.setText(f"{fc:,} / {tc:,} files")
+        self._update_scope_ui()
+
+    def _update_scope_ui(self):
+        scoped_paths = self._model._scoped_paths
+        if scoped_paths:
+            title = self._active_scope_title or "Workbench Scope"
+            self._scope_label.setText(f"Scope: {title} ({len(scoped_paths):,})")
+            self._scope_label.setVisible(True)
+            self._clear_scope_btn.setVisible(True)
+        else:
+            self._scope_label.clear()
+            self._scope_label.setVisible(False)
+            self._clear_scope_btn.setVisible(False)
+
+    def _ensure_workbench_dialog(self) -> ExplorerWorkbenchDialog:
+        if self._workbench_dialog is None:
+            self._workbench_dialog = ExplorerWorkbenchDialog(self._config, self)
+            self._workbench_dialog.workbench.scope_requested.connect(self._apply_workbench_scope)
+            self._workbench_dialog.workbench.clear_scope_requested.connect(self._clear_workbench_scope)
+            if self._vfs is not None:
+                self._workbench_dialog.workbench.set_vfs(self._vfs)
+        return self._workbench_dialog
+
+    def _open_workbench_dialog(self):
+        if not self._vfs:
+            show_error(self, "Explorer Navigator", "Load the game data first.")
+            return
+        dialog = self._ensure_workbench_dialog()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _apply_workbench_scope(self, paths: list[str], preferred_path: str = "", title: str = ""):
+        normalized = []
+        seen = set()
+        for path in paths:
+            norm = path.replace("\\", "/")
+            lower = norm.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
+            normalized.append(norm)
+        if not normalized:
+            self._clear_workbench_scope()
+            return
+
+        self._active_scope_title = title or "Workbench Scope"
+        if self._group_combo.currentText() != ALL_PACKAGES:
+            self._pending_scope_request = (normalized, preferred_path, self._active_scope_title)
+            self._group_combo.setCurrentText(ALL_PACKAGES)
+            return
+
+        self._pending_scope_request = None
+        self._model.set_scope_paths(normalized)
+        self._apply_filter()
+        self._select_entry_path(preferred_path)
+
+    def _clear_workbench_scope(self):
+        self._active_scope_title = ""
+        self._pending_scope_request = None
+        self._model.set_scope_paths(None)
+        self._apply_filter()
+
+    def _select_entry_path(self, preferred_path: str):
+        if not preferred_path:
+            return
+        preferred_lower = preferred_path.replace("\\", "/").lower()
+        for row in range(self._model.rowCount()):
+            row_data = self._model.row_at(row)
+            if row_data and row_data.entry.path.lower() == preferred_lower:
+                index = self._model.index(row, _COL_FILE)
+                self._view.setCurrentIndex(index)
+                self._view.selectRow(row)
+                self._view.scrollTo(index, QTableView.PositionAtCenter)
+                return
 
     def _get_selected_rows(self) -> list[int]:
         """Return sorted list of unique selected view row indices."""
@@ -787,6 +909,10 @@ class ExplorerTab(QWidget):
 
     def _preview_from_archive(self, entry: PamtFileEntry):
         try:
+            now = time.monotonic()
+            if entry.path == self._last_preview_path and (now - self._last_preview_time) < 0.25:
+                return
+
             self._progress.set_status(f"Loading {os.path.basename(entry.path)}...")
             data = self._vfs.read_entry_data(entry)
             basename = os.path.basename(entry.path)
@@ -794,6 +920,8 @@ class ExplorerTab(QWidget):
             with open(temp_path, "wb") as f:
                 f.write(data)
             self._preview.preview_file(temp_path)
+            self._last_preview_path = entry.path
+            self._last_preview_time = now
             self._progress.set_status(f"Preview: {basename} ({format_file_size(len(data))})")
         except Exception as e:
             self._progress.set_status(f"Preview error: {e}")

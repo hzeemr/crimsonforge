@@ -53,6 +53,7 @@ class VfsManager:
         self._papgt_data: Optional[PapgtData] = None
         self._pamt_cache: dict[str, PamtData] = {}
         self._root = VfsNode(name="root", is_dir=True)
+        self._logged_processing_warnings: set[tuple[str, str]] = set()
 
     def load_papgt(self) -> PapgtData:
         """Load and parse the PAPGT root index."""
@@ -152,8 +153,7 @@ class VfsManager:
                 data = decompress(data, entry.orig_size, entry.compression_type)
                 result["decompressed"] = True
             except (ValueError, Exception) as e:
-                logger.warning("Decompression failed for %s (may be modded/corrupt), "
-                               "extracting raw data: %s", entry.path, e)
+                self._log_processing_warning(entry, e, extracting=True)
 
         rel_path = entry.path.replace("\\", "/").replace("/", os.sep)
         out_path = os.path.join(output_dir, rel_path)
@@ -187,12 +187,46 @@ class VfsManager:
             try:
                 data = decompress(data, entry.orig_size, entry.compression_type)
             except (ValueError, Exception) as e:
-                logger.warning("Decompression failed for %s (may be modded/corrupt): %s",
-                               entry.path, e)
+                self._log_processing_warning(entry, e, extracting=False)
                 # Return raw decrypted data so the app doesn't crash
                 # The file will show as corrupt in preview but won't block browsing
 
         return data
+
+    def _log_processing_warning(self, entry: PamtFileEntry, error: Exception, *, extracting: bool) -> None:
+        """Log decompression issues once per file/reason with more accurate wording."""
+        message = str(error)
+        is_unsupported_type1_dds = (
+            entry.path.lower().endswith(".dds")
+            and entry.compression_type == 1
+            and "Unsupported type-1 payload layout" in message
+        )
+
+        issue_key = (entry.path.lower(), "type1-dds" if is_unsupported_type1_dds else message)
+        if issue_key in self._logged_processing_warnings:
+            return
+        self._logged_processing_warnings.add(issue_key)
+
+        if is_unsupported_type1_dds:
+            logger.info(
+                "DDS preview limitation for %s: %s",
+                entry.path,
+                message,
+            )
+            return
+
+        if extracting:
+            logger.warning(
+                "Decompression failed for %s (extracting raw data instead): %s",
+                entry.path,
+                message,
+            )
+        else:
+            logger.warning(
+                "Decompression failed for %s: %s",
+                entry.path,
+                message,
+            )
 
     def get_tree(self) -> VfsNode:
         """Get the VFS tree root."""

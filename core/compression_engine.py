@@ -58,6 +58,151 @@ def _decompress_type1_par(data: bytes) -> bytes:
     return bytes(output)
 
 
+def _decompress_type1_prefixed_lz4(data: bytes, original_size: int) -> bytes:
+    """Decompress type-1 payloads that keep a plain file header and LZ4 body.
+
+    Some UI DDS assets store the normal 128-byte DDS header uncompressed and
+    only LZ4-compress the pixel payload that follows. Those files are marked as
+    compression type 1 in PAMT, but they are not PAR containers.
+    """
+    if original_size <= len(data):
+        return data
+
+    if len(data) < 128 or data[:4] != b"DDS ":
+        return data
+
+    header = data[:128]
+    payload = data[128:]
+    expected_payload_size = original_size - 128
+    if expected_payload_size <= 0:
+        return data
+
+    try:
+        decompressed_payload = lz4.block.decompress(payload, uncompressed_size=expected_payload_size)
+    except lz4.block.LZ4BlockError:
+        return data
+
+    if len(decompressed_payload) != expected_payload_size:
+        return data
+
+    return header + decompressed_payload
+
+
+def _decompress_type1_dds_first_mip_lz4_tail(data: bytes, original_size: int) -> bytes:
+    """Decompress type-1 DDS files that store a compressed top mip and raw mip tail.
+
+    A large class of Crimson Desert DDS textures keeps the normal DDS header,
+    LZ4-compresses only the first mip level, then appends the remaining lower
+    mip levels as raw DDS payload bytes. We reconstruct the full DDS body by
+    decoding just enough raw LZ4 data to fill the top mip, then concatenating
+    the remaining tail bytes.
+    """
+    if original_size <= len(data):
+        return data
+    if len(data) < 128 or data[:4] != b"DDS ":
+        return data
+
+    try:
+        from core.dds_reader import (
+            read_dds_info,
+            expected_dds_data_size,
+            expected_first_mip_payload_size,
+        )
+    except Exception:
+        return data
+
+    try:
+        info = read_dds_info(data)
+    except Exception:
+        return data
+
+    expected_total_size = expected_dds_data_size(info)
+    first_mip_size = expected_first_mip_payload_size(info)
+    if expected_total_size is None or first_mip_size is None:
+        return data
+    if expected_total_size != original_size:
+        return data
+
+    tail_size = expected_total_size - info.data_offset - first_mip_size
+    if tail_size < 0:
+        return data
+
+    body = data[info.data_offset:]
+    rebuilt_top_mip = _decode_type1_dds_top_mip_lz4(body, first_mip_size, tail_size)
+    if rebuilt_top_mip is None:
+        return data
+
+    return data[:info.data_offset] + rebuilt_top_mip
+
+
+def _decode_type1_dds_top_mip_lz4(body: bytes, first_mip_size: int, tail_size: int) -> bytes | None:
+    """Decode a raw-LZ4 top mip and attach the raw remaining mip tail."""
+    i = 0
+    out = bytearray()
+
+    while i < len(body):
+        token = body[i]
+        i += 1
+
+        literal_len = token >> 4
+        if literal_len == 15:
+            while True:
+                if i >= len(body):
+                    return None
+                extra = body[i]
+                i += 1
+                literal_len += extra
+                if extra != 255:
+                    break
+
+        if i + literal_len > len(body):
+            return None
+
+        remaining_top_mip = first_mip_size - len(out)
+        if literal_len >= remaining_top_mip:
+            out.extend(body[i:i + remaining_top_mip])
+            i += remaining_top_mip
+            if len(body) - i != tail_size:
+                return None
+            return bytes(out) + body[i:]
+
+        out.extend(body[i:i + literal_len])
+        i += literal_len
+
+        if i + 2 > len(body):
+            return None
+
+        offset = body[i] | (body[i + 1] << 8)
+        if offset == 0:
+            return None
+        i += 2
+
+        match_len = token & 0x0F
+        if match_len == 15:
+            while True:
+                if i >= len(body):
+                    return None
+                extra = body[i]
+                i += 1
+                match_len += extra
+                if extra != 255:
+                    break
+        match_len += 4
+
+        remaining_top_mip = first_mip_size - len(out)
+        if match_len > remaining_top_mip:
+            return None
+
+        match_start = len(out) - offset
+        if match_start < 0:
+            return None
+        for _ in range(match_len):
+            out.append(out[match_start])
+            match_start += 1
+
+    return None
+
+
 def decompress(data: bytes, original_size: int, compression_type: int) -> bytes:
     """Decompress data based on the compression type from PAMT flags.
 
@@ -76,7 +221,19 @@ def decompress(data: bytes, original_size: int, compression_type: int) -> bytes:
         return data
 
     if compression_type == COMP_RAW:
-        return _decompress_type1_par(data)[:original_size]
+        result = _decompress_type1_par(data)
+        if len(result) >= original_size:
+            return result[:original_size]
+        result = _decompress_type1_prefixed_lz4(result, original_size)
+        if len(result) >= original_size:
+            return result[:original_size]
+        result = _decompress_type1_dds_first_mip_lz4_tail(result, original_size)
+        if len(result) >= original_size:
+            return result[:original_size]
+        raise ValueError(
+            f"Unsupported type-1 payload layout: got {len(result)} bytes, "
+            f"expected {original_size} bytes after decompression."
+        )
 
     if compression_type == COMP_LZ4:
         try:

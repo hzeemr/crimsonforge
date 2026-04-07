@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
     QPlainTextEdit, QScrollArea, QPushButton,
 )
-from PySide6.QtGui import QPixmap, QFont
+from PySide6.QtGui import QPixmap, QFont, QImage
 from PySide6.QtCore import Qt, QUrl
 
 from core.file_detector import detect_file_type
@@ -324,6 +324,12 @@ class PreviewPane(QWidget):
 
     def _show_image(self, path: str) -> None:
         ext = os.path.splitext(path)[1].lower()
+        if ext == ".dds":
+            dds_error = self._get_dds_preview_error(path)
+            if dds_error:
+                self._show_empty(dds_error)
+                return
+
         pixmap = QPixmap(path)
 
         if pixmap.isNull() and ext == ".dds":
@@ -336,6 +342,8 @@ class PreviewPane(QWidget):
             self._show_empty(f"Cannot load image: {os.path.basename(path)}")
             return
 
+        pixmap = self._crop_transparent_preview_bounds(pixmap)
+
         max_w = max(self._image_scroll.width() - 20, 200)
         max_h = max(self._image_scroll.height() - 20, 200)
         if pixmap.width() > max_w or pixmap.height() > max_h:
@@ -345,6 +353,17 @@ class PreviewPane(QWidget):
             self._info_label.text() + f"  |  {pixmap.width()}x{pixmap.height()}"
         )
         self._stack.setCurrentIndex(IDX_IMAGE)
+
+    def _get_dds_preview_error(self, path: str) -> str:
+        """Return a user-facing DDS preview error, or an empty string when the file is safe to decode."""
+        try:
+            from core.dds_reader import validate_dds_payload_size
+
+            with open(path, "rb") as f:
+                validate_dds_payload_size(f.read())
+            return ""
+        except Exception as exc:
+            return f"DDS preview unavailable: {exc}"
 
     def _show_mesh_info(self, path: str) -> None:
         """Show an interactive 3D preview of the mesh."""
@@ -516,11 +535,57 @@ class PreviewPane(QWidget):
         except Exception:
             return QPixmap()
 
+    def _crop_transparent_preview_bounds(self, pixmap: QPixmap) -> QPixmap:
+        """Tighten image previews around visible pixels when large transparent borders exist.
+
+        Some UI portraits/quest images are stored in a larger transparent canvas,
+        which makes the real image appear as a tiny strip in the generic preview.
+        """
+        if pixmap.isNull():
+            return pixmap
+
+        image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+        if image.isNull() or not image.hasAlphaChannel():
+            return pixmap
+
+        width = image.width()
+        height = image.height()
+        min_x = width
+        min_y = height
+        max_x = -1
+        max_y = -1
+
+        for y in range(height):
+            for x in range(width):
+                if image.pixelColor(x, y).alpha() > 0:
+                    if x < min_x:
+                        min_x = x
+                    if y < min_y:
+                        min_y = y
+                    if x > max_x:
+                        max_x = x
+                    if y > max_y:
+                        max_y = y
+
+        if max_x < min_x or max_y < min_y:
+            return pixmap
+
+        crop_width = max_x - min_x + 1
+        crop_height = max_y - min_y + 1
+        if crop_width >= width and crop_height >= height:
+            return pixmap
+
+        crop_area = crop_width * crop_height
+        full_area = width * height
+        if crop_area / max(full_area, 1) > 0.9:
+            return pixmap
+
+        return pixmap.copy(min_x, min_y, crop_width, crop_height)
+
     def _convert_image_with_pillow(self, path: str) -> QPixmap:
         """Convert DDS/TGA/other formats to QPixmap via Pillow."""
         try:
             from PIL import Image, ImageFile
-            from PySide6.QtGui import QImage
 
             ImageFile.LOAD_TRUNCATED_IMAGES = True
             img = Image.open(path)

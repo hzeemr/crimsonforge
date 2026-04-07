@@ -1267,36 +1267,35 @@ def _find_pac_descriptors(
         ))
         seen_starts.add(desc_start)
 
-    pos = 0
-    pattern = bytes([0x04, 0x00, 0x01, 0x02, 0x03])
-    while True:
-        idx = region.find(pattern, pos)
-        if idx == -1:
-            break
-        _append_descriptor(idx, 4, 40, 48)
-        pos = idx + len(pattern)
+    # PAC section-0 descriptors are not fully uniform. Most use the classic:
+    #   4 LODs: 04 00 01 02 03
+    #   3 LODs: 03 00 01 02
+    #   2 LODs: 02 00 01
+    # Some character heads (for example Kliff/Macduff) use a 3-LOD variant
+    # with an extra marker byte before the count table:
+    #   03 00 01 01 02
+    # Support both layouts while deduping by desc_start so we can parse the
+    # full head mesh instead of only the eyecover helper submesh.
+    pattern_specs = [
+        (bytes([0x04, 0x00, 0x01, 0x02, 0x03]), 4, 40, 48,
+         lambda idx: True),
+        (bytes([0x03, 0x00, 0x01, 0x01, 0x02]), 3, 40, 46,
+         lambda idx: True),
+        (bytes([0x03, 0x00, 0x01, 0x02]), 3, 40, 46,
+         lambda idx: idx < 1 or region[idx - 1] != 0x04),
+        (bytes([0x02, 0x00, 0x01]), 2, 40, 44,
+         lambda idx: idx < 1 or region[idx - 1] not in (0x03, 0x04)),
+    ]
 
-    pos = 0
-    pattern = bytes([0x03, 0x00, 0x01, 0x02])
-    while True:
-        idx = region.find(pattern, pos)
-        if idx == -1:
-            break
-        if idx >= 1 and region[idx - 1] != 0x04:
-            _append_descriptor(idx, 3, 40, 46)
-        pos = idx + len(pattern)
-
-    pos = 0
-    pattern = bytes([0x02, 0x00, 0x01])
-    while True:
-        idx = region.find(pattern, pos)
-        if idx == -1:
-            break
-        if idx >= 1 and region[idx - 1] in (0x03, 0x04):
+    for pattern, lod_count, vc_off, ic_off, should_accept in pattern_specs:
+        pos = 0
+        while True:
+            idx = region.find(pattern, pos)
+            if idx == -1:
+                break
+            if should_accept(idx):
+                _append_descriptor(idx, lod_count, vc_off, ic_off)
             pos = idx + len(pattern)
-            continue
-        _append_descriptor(idx, 2, 40, 44)
-        pos = idx + len(pattern)
 
     found.sort(key=lambda item: item[0])
     return [desc for _, desc in found]

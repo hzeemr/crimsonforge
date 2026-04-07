@@ -17,11 +17,23 @@ VERSION BUMPING RULES
 __all__ = ["APP_VERSION", "APP_NAME", "CHANGELOG"]
 
 APP_NAME = "CrimsonForge"
-APP_VERSION = "1.15.0"
+APP_VERSION = "1.16.0"
 
 # Each entry: (version, date, list_of_changes)
 # Newest first. `date` is YYYY-MM-DD.
 CHANGELOG: list[tuple[str, str, list[str]]] = [
+    (
+        "1.16.0", "2026-04-07", [
+            "[Feature] Explorer Navigator added as a dedicated popup workbench with live Characters, Items, and Families views built directly from installed game data",
+            "[Feature] Navigator selections now scope the normal Explorer file table to exact related archive paths so preview, export, import, patch, ship, extract, and editor workflows continue to use the same Explorer rows",
+            "[Enhancement] Navigator now preloads from the active game session and reuses the already loaded game path and PAMT cache instead of rebuilding a separate cold index every time the popup opens",
+            "[Enhancement] Navigator UI/UX upgraded with clearer popup flow, active scope labeling, one-click clear scope, resizable split layouts, and zoomable image panels with Fit and 100% controls",
+            "[Fix] Navigator DDS image preview now uses the correct decode path for live UI portraits and item icons, matching Explorer behavior instead of failing to load valid DDS files",
+            "[Fix] DDS preview support expanded for additional type-1 compressed layouts, including prefixed-LZ4 and first-mip-LZ4-plus-tail families, so more portrait, impostor, and atlas textures open correctly instead of showing dots or noise",
+            "[Fix] Unsupported short DDS payloads now fail cleanly with a real preview limitation message instead of fake dot/noise renders, reducing false corruption reports on edge-case textures",
+            "[Fix] PAC preview parser now supports additional descriptor variants such as the Kliff/Macduff head layout, restoring full head mesh parsing instead of partial eyecover-only previews",
+        ],
+    ),
     (
         "1.15.0", "2026-04-06", [
             "[Fix] OBJ reimport now preserves the real face-level UV and normal index mapping from Blender exports instead of assuming position, UV, and normal indices always match",

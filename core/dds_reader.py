@@ -58,6 +58,74 @@ class DdsInfo:
     file_size: int = 0
 
 
+def expected_dds_data_size(info: DdsInfo) -> int | None:
+    """Return the expected total DDS byte size from the header, or None if unknown."""
+    total_payload = 0
+    width = max(1, info.width)
+    height = max(1, info.height)
+    mip_count = max(1, info.mip_count)
+
+    for _ in range(mip_count):
+        payload_size = expected_mip_payload_size(info, width, height)
+        if payload_size is None:
+            return None
+        total_payload += payload_size
+        width = max(1, width // 2)
+        height = max(1, height // 2)
+
+    return info.data_offset + total_payload
+
+
+def expected_first_mip_payload_size(info: DdsInfo) -> int | None:
+    """Return the expected byte size of the first mip level payload."""
+    return expected_mip_payload_size(info, max(1, info.width), max(1, info.height))
+
+
+def expected_mip_payload_size(info: DdsInfo, width: int, height: int) -> int | None:
+    """Return the expected payload size of one mip level for the DDS format."""
+    blocks_w = max(1, (width + 3) // 4)
+    blocks_h = max(1, (height + 3) // 4)
+
+    if info.fourcc == "DXT1" or info.format.startswith("BC1"):
+        return blocks_w * blocks_h * 8
+    if (
+        info.fourcc == "DXT3"
+        or info.format.startswith("BC2")
+        or info.fourcc == "DXT5"
+        or info.format.startswith("BC3")
+        or info.fourcc == "BC5U"
+        or info.format.startswith("BC5")
+        or info.format.startswith("BC6H")
+        or info.format.startswith("BC7")
+    ):
+        return blocks_w * blocks_h * 16
+    if info.fourcc == "BC4U" or info.format.startswith("BC4"):
+        return blocks_w * blocks_h * 8
+    if info.format in ("RGBA 32-bit", "RGB 32-bit"):
+        return width * height * 4
+    if info.format == "RGB 24-bit":
+        return width * height * 3
+    if info.format == "Luminance 8-bit":
+        return width * height
+    if info.format == "Luminance 16-bit":
+        return width * height * 2
+    return None
+
+
+def validate_dds_payload_size(data: bytes, info: DdsInfo | None = None) -> DdsInfo:
+    """Validate that the DDS body is large enough for the mip chain declared in the header."""
+    info = info or read_dds_info(data)
+    expected_size = expected_dds_data_size(info)
+    if expected_size is not None and len(data) < expected_size:
+        raise ValueError(
+            "DDS payload is shorter than its header declares "
+            f"({len(data)} < {expected_size} bytes). "
+            "This usually means the archive entry is still using an unsupported "
+            "type-1 compressed texture layout."
+        )
+    return info
+
+
 def read_dds_info(data: bytes) -> DdsInfo:
     """Parse DDS header and return metadata."""
     if len(data) < 128 or data[:4] != DDS_MAGIC:
@@ -152,7 +220,7 @@ def decode_dds_to_rgba(data: bytes) -> tuple[int, int, bytes]:
     Returns (width, height, rgba_bytes) or raises on unsupported format.
     Only supports DXT1, DXT5, and uncompressed RGBA for preview.
     """
-    info = read_dds_info(data)
+    info = validate_dds_payload_size(data)
     w, h = info.width, info.height
     offset = info.data_offset
 
@@ -573,7 +641,7 @@ def _decode_raw_fallback(data: bytes, width: int, height: int, bpp: int) -> byte
 def get_dds_summary(data: bytes) -> str:
     """Get a human-readable summary of a DDS file."""
     try:
-        info = read_dds_info(data)
+        info = validate_dds_payload_size(data)
         size_kb = info.file_size / 1024
         return (
             f"DDS Texture: {info.width}x{info.height}\n"
