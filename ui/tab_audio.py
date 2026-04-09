@@ -602,30 +602,65 @@ class AudioTab(QWidget):
         self._omnivoice_class_temp.setValue(float(self._config.get("tts.omnivoice_class_temperature", 0.0)))
         adv_form.addRow("Class Temp:", self._omnivoice_class_temp)
 
+        self._omnivoice_gender_use = QCheckBox()
+        self._omnivoice_gender_use.setChecked(bool(self._config.get("tts.omnivoice_gender_use", False)))
         self._omnivoice_gender = QComboBox()
         self._omnivoice_gender.addItems(['Auto', 'Male / 男', 'Female / 女'])
         self._omnivoice_gender.setStyleSheet(combo_style)
-        adv_form.addRow("Gender:", self._omnivoice_gender)
+        self._omnivoice_gender.setEnabled(self._omnivoice_gender_use.isChecked())
+        self._omnivoice_gender_use.toggled.connect(self._omnivoice_gender.setEnabled)
+        h1 = QHBoxLayout()
+        h1.addWidget(self._omnivoice_gender_use)
+        h1.addWidget(self._omnivoice_gender)
+        adv_form.addRow("Gender:", h1)
 
+        self._omnivoice_age_use = QCheckBox()
+        self._omnivoice_age_use.setChecked(bool(self._config.get("tts.omnivoice_age_use", False)))
         self._omnivoice_age = QComboBox()
         self._omnivoice_age.addItems(['Auto', 'Child / 儿童', 'Teenager / 少年', 'Young Adult / 青年', 'Middle-aged / 中年', 'Elderly / 老年'])
         self._omnivoice_age.setStyleSheet(combo_style)
-        adv_form.addRow("Age:", self._omnivoice_age)
+        self._omnivoice_age.setEnabled(self._omnivoice_age_use.isChecked())
+        self._omnivoice_age_use.toggled.connect(self._omnivoice_age.setEnabled)
+        h2 = QHBoxLayout()
+        h2.addWidget(self._omnivoice_age_use)
+        h2.addWidget(self._omnivoice_age)
+        adv_form.addRow("Age:", h2)
 
+        self._omnivoice_pitch_use = QCheckBox()
+        self._omnivoice_pitch_use.setChecked(bool(self._config.get("tts.omnivoice_pitch_use", False)))
         self._omnivoice_pitch = QComboBox()
         self._omnivoice_pitch.addItems(['Auto', 'Very Low Pitch / 极低音调', 'Low Pitch / 低音调', 'Moderate Pitch / 中音调', 'High Pitch / 高音调', 'Very High Pitch / 极高音调'])
         self._omnivoice_pitch.setStyleSheet(combo_style)
-        adv_form.addRow("Pitch:", self._omnivoice_pitch)
+        self._omnivoice_pitch.setEnabled(self._omnivoice_pitch_use.isChecked())
+        self._omnivoice_pitch_use.toggled.connect(self._omnivoice_pitch.setEnabled)
+        h3 = QHBoxLayout()
+        h3.addWidget(self._omnivoice_pitch_use)
+        h3.addWidget(self._omnivoice_pitch)
+        adv_form.addRow("Pitch:", h3)
 
+        self._omnivoice_style_use = QCheckBox()
+        self._omnivoice_style_use.setChecked(bool(self._config.get("tts.omnivoice_style_use", False)))
         self._omnivoice_style = QComboBox()
         self._omnivoice_style.addItems(['Auto', 'Whisper / 耳语'])
         self._omnivoice_style.setStyleSheet(combo_style)
-        adv_form.addRow("Style:", self._omnivoice_style)
+        self._omnivoice_style.setEnabled(self._omnivoice_style_use.isChecked())
+        self._omnivoice_style_use.toggled.connect(self._omnivoice_style.setEnabled)
+        h4 = QHBoxLayout()
+        h4.addWidget(self._omnivoice_style_use)
+        h4.addWidget(self._omnivoice_style)
+        adv_form.addRow("Style:", h4)
 
+        self._omnivoice_accent_use = QCheckBox()
+        self._omnivoice_accent_use.setChecked(bool(self._config.get("tts.omnivoice_accent_use", False)))
         self._omnivoice_accent = QComboBox()
         self._omnivoice_accent.addItems(['Auto', 'American Accent / 美式口音', 'Australian Accent / 澳大利亚口音', 'British Accent / 英国口音', 'Chinese Accent / 中国口音', 'Canadian Accent / 加拿大口音', 'Indian Accent / 印度口音', 'Korean Accent / 韩国口音', 'Portuguese Accent / 葡萄牙口音', 'Russian Accent / 俄罗斯口音', 'Japanese Accent / 日本口音'])
         self._omnivoice_accent.setStyleSheet(combo_style)
-        adv_form.addRow("English Accent:", self._omnivoice_accent)
+        self._omnivoice_accent.setEnabled(self._omnivoice_accent_use.isChecked())
+        self._omnivoice_accent_use.toggled.connect(self._omnivoice_accent.setEnabled)
+        h5 = QHBoxLayout()
+        h5.addWidget(self._omnivoice_accent_use)
+        h5.addWidget(self._omnivoice_accent)
+        adv_form.addRow("English Accent:", h5)
         rl.addWidget(self._omnivoice_advanced_group)
 
         rl.addWidget(QLabel("Text:"))
@@ -816,6 +851,11 @@ class AudioTab(QWidget):
         self._config.set("tts.omnivoice_pitch", self._omnivoice_pitch.currentText())
         self._config.set("tts.omnivoice_style", self._omnivoice_style.currentText())
         self._config.set("tts.omnivoice_accent", self._omnivoice_accent.currentText())
+        self._config.set("tts.omnivoice_gender_use", self._omnivoice_gender_use.isChecked())
+        self._config.set("tts.omnivoice_age_use", self._omnivoice_age_use.isChecked())
+        self._config.set("tts.omnivoice_pitch_use", self._omnivoice_pitch_use.isChecked())
+        self._config.set("tts.omnivoice_style_use", self._omnivoice_style_use.isChecked())
+        self._config.set("tts.omnivoice_accent_use", self._omnivoice_accent_use.isChecked())
 
     def _apply_omnivoice_ui_state(self):
         mode = self._config.get("tts.omnivoice_clone_mode", "one_shot")
@@ -830,6 +870,19 @@ class AudioTab(QWidget):
         self._omnivoice_pitch.setCurrentText(self._config.get("tts.omnivoice_pitch", "Auto"))
         self._omnivoice_style.setCurrentText(self._config.get("tts.omnivoice_style", "Auto"))
         self._omnivoice_accent.setCurrentText(self._config.get("tts.omnivoice_accent", "Auto"))
+
+        self._omnivoice_gender_use.setChecked(bool(self._config.get("tts.omnivoice_gender_use", False)))
+        self._omnivoice_age_use.setChecked(bool(self._config.get("tts.omnivoice_age_use", False)))
+        self._omnivoice_pitch_use.setChecked(bool(self._config.get("tts.omnivoice_pitch_use", False)))
+        self._omnivoice_style_use.setChecked(bool(self._config.get("tts.omnivoice_style_use", False)))
+        self._omnivoice_accent_use.setChecked(bool(self._config.get("tts.omnivoice_accent_use", False)))
+
+        # Explicitly apply enabled state based on loaded checkbox values
+        self._omnivoice_gender.setEnabled(self._omnivoice_gender_use.isChecked())
+        self._omnivoice_age.setEnabled(self._omnivoice_age_use.isChecked())
+        self._omnivoice_pitch.setEnabled(self._omnivoice_pitch_use.isChecked())
+        self._omnivoice_style.setEnabled(self._omnivoice_style_use.isChecked())
+        self._omnivoice_accent.setEnabled(self._omnivoice_accent_use.isChecked())
 
     def _refresh_provider_specific_ui(self):
         is_omni = self._is_omnivoice_provider()
@@ -1333,11 +1386,11 @@ class AudioTab(QWidget):
             "t_shift": self._omnivoice_t_shift.value(),
             "position_temperature": self._omnivoice_position_temp.value(),
             "class_temperature": self._omnivoice_class_temp.value(),
-            "param_9": self._omnivoice_gender.currentText(),
-            "param_10": self._omnivoice_age.currentText(),
-            "param_11": self._omnivoice_pitch.currentText(),
-            "param_12": self._omnivoice_style.currentText(),
-            "param_13": self._omnivoice_accent.currentText(),
+            "param_9": self._omnivoice_gender.currentText() if self._omnivoice_gender_use.isChecked() else "Auto",
+            "param_10": self._omnivoice_age.currentText() if self._omnivoice_age_use.isChecked() else "Auto",
+            "param_11": self._omnivoice_pitch.currentText() if self._omnivoice_pitch_use.isChecked() else "Auto",
+            "param_12": self._omnivoice_style.currentText() if self._omnivoice_style_use.isChecked() else "Auto",
+            "param_13": self._omnivoice_accent.currentText() if self._omnivoice_accent_use.isChecked() else "Auto",
             "response_format": "wav",
             "stream": False,
         }
