@@ -16,13 +16,12 @@ Features:
 
 import os
 import tempfile
-from enum import Enum
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QSplitter, QTableView, QHeaderView, QPlainTextEdit,
     QAbstractItemView, QApplication, QMenu, QSlider, QListWidget,
     QListWidgetItem, QGroupBox, QFormLayout, QCheckBox, QSpinBox,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QCompleter,
 )
 from PySide6.QtCore import (
     Qt, Signal, QTimer, QAbstractTableModel, QModelIndex,
@@ -141,8 +140,9 @@ _COL_CATEGORY = 2
 _COL_TEXT = 3
 _COL_SIZE = 4
 _COL_NPC = 5
-_COL_COUNT = 6
-_HEADERS = ["File", "Lang", "Category", "Text", "Size", "NPC Voice"]
+_COL_LOCATION = 6
+_COL_COUNT = 7
+_HEADERS = ["File", "Lang", "Category", "Text", "Size", "NPC Voice", "Location"]
 
 
 class _AudioModel(QAbstractTableModel):
@@ -218,7 +218,10 @@ class _AudioModel(QAbstractTableModel):
             if col == _COL_FILE:
                 return os.path.basename(e.entry.path)
             elif col == _COL_LANG:
-                return e.voice_lang.upper() if e.voice_lang else ""
+                lang = e.voice_lang.lower() if e.voice_lang else ""
+                if lang == "ja":
+                    return "CH"
+                return lang.upper()
             elif col == _COL_CATEGORY:
                 return e.category
             elif col == _COL_TEXT:
@@ -227,6 +230,8 @@ class _AudioModel(QAbstractTableModel):
                 return format_file_size(e.entry.orig_size)
             elif col == _COL_NPC:
                 return e.voice_prefix
+            elif col == _COL_LOCATION:
+                return e.entry.paz_file
 
         elif role == Qt.ForegroundRole:
             if col == _COL_LANG:
@@ -236,7 +241,11 @@ class _AudioModel(QAbstractTableModel):
                 return QColor("#a6e3a1")
 
         elif role == Qt.ToolTipRole:
-            lines = [e.entry.path, f"Key: {e.paloc_key}"]
+            lines = [
+                f"Game Path: {e.entry.path}",
+                f"Archive: {e.entry.paz_file}",
+                f"Key: {e.paloc_key}"
+            ]
             if e.text_original:
                 lines.append(f"Text: {e.text_original[:200]}")
             if e.npc_gender:
@@ -261,6 +270,8 @@ class _AudioModel(QAbstractTableModel):
             self._filtered.sort(key=lambda i: a[i].entry.orig_size, reverse=rev)
         elif column == _COL_NPC:
             self._filtered.sort(key=lambda i: a[i].voice_prefix, reverse=rev)
+        elif column == _COL_LOCATION:
+            self._filtered.sort(key=lambda i: a[i].entry.paz_file, reverse=rev)
         self.endResetModel()
 
     @property
@@ -300,7 +311,7 @@ class AudioTab(QWidget):
         self._lang_filter = QComboBox()
         self._lang_filter.addItem(ALL_LANGUAGES, "")
         self._lang_filter.addItem("Korean (KO)", "ko")
-        self._lang_filter.addItem("Japanese (JA)", "ja")
+        self._lang_filter.addItem("Chinois (CH)", "ja")
         self._lang_filter.addItem("English (EN)", "en")
         self._lang_filter.currentIndexChanged.connect(lambda _: self._apply_filter())
         self._lang_filter.setMinimumWidth(120)
@@ -361,6 +372,8 @@ class AudioTab(QWidget):
         self._view.setColumnWidth(_COL_CATEGORY, 120)
         self._view.setColumnWidth(_COL_SIZE, 60)
         self._view.setColumnWidth(_COL_NPC, 140)
+        self._view.setColumnWidth(_COL_LOCATION, 500)
+        self._view.horizontalHeader().setSectionResizeMode(_COL_LOCATION, QHeaderView.Interactive)
         self._view.clicked.connect(self._on_row_clicked)
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._show_context_menu)
@@ -410,9 +423,28 @@ class AudioTab(QWidget):
 
         rl.addWidget(QLabel("TTS Generator"))
 
+        # Style for dropdown arrows to match user request (#87CEFA)
+        combo_style = """
+            QComboBox::drop-down {
+                background-color: #87CEFA;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+                width: 24px;
+            }
+            QComboBox::down-arrow {
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #1e1e2e;
+                width: 0;
+                height: 0;
+                margin-top: 2px;
+            }
+        """
+
         pr = QHBoxLayout()
         pr.addWidget(QLabel("Provider:"))
         self._tts_provider = QComboBox()
+        self._tts_provider.setStyleSheet(combo_style)
         self._tts_provider.currentIndexChanged.connect(self._on_tts_provider_changed)
         pr.addWidget(self._tts_provider, 1)
         rl.addLayout(pr)
@@ -421,6 +453,7 @@ class AudioTab(QWidget):
         mr.addWidget(QLabel("Model:"))
         self._tts_model = QComboBox()
         self._tts_model.setEditable(True)
+        self._tts_model.setStyleSheet(combo_style)
         mr.addWidget(self._tts_model, 1)
         self._tts_refresh_models_btn = QPushButton("Refresh")
         self._tts_refresh_models_btn.setFixedWidth(55)
@@ -436,6 +469,7 @@ class AudioTab(QWidget):
         vr.addWidget(QLabel("Voice:"))
         self._voice_combo = QComboBox()
         self._voice_combo.setEditable(True)
+        self._voice_combo.setStyleSheet(combo_style)
         vr.addWidget(self._voice_combo, 1)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setFixedWidth(55)
@@ -447,10 +481,18 @@ class AudioTab(QWidget):
         lr.addWidget(QLabel("Language:"))
         self._tts_lang = QComboBox()
         self._tts_lang.setEditable(True)
+        self._tts_lang.setStyleSheet(combo_style)
         # Default starter list, will be populated by _refresh_provider_specific_ui
         self._tts_lang.addItems(["Auto", "en-US", "ko-KR", "ja-JP", "zh-CN"])
         self._tts_lang.setCurrentText("Auto")
         self._tts_lang.currentTextChanged.connect(lambda _: self._refresh_tts_voices())
+        
+        # Make language dropdown searchable/filterable
+        self._tts_lang.setInsertPolicy(QComboBox.NoInsert)
+        if self._tts_lang.completer():
+            self._tts_lang.completer().setCompletionMode(QCompleter.PopupCompletion)
+            self._tts_lang.completer().setFilterMode(Qt.MatchContains)
+            
         lr.addWidget(self._tts_lang, 1)
         rl.addLayout(lr)
 
@@ -832,14 +874,17 @@ class AudioTab(QWidget):
             # Build text display
             lines = []
             lines.append(f"File: {entry.path}")
-            lines.append(f"Language: {ae.voice_lang.upper()} | Category: {ae.category}")
+            display_lang = ae.voice_lang.upper()
+            if ae.voice_lang.lower() == "ja":
+                display_lang = "CH"
+            lines.append(f"Language: {display_lang} | Category: {ae.category}")
             lines.append(f"NPC: {ae.npc_gender} {ae.npc_class} ({ae.npc_age})")
             lines.append(f"Paloc Key: {ae.paloc_key}")
             lines.append("")
 
             if ae.text_translations:
                 lang_names = {
-                    "ko": "Korean", "en": "English", "ja": "Japanese",
+                    "ko": "Korean", "en": "English", "ja": "Chinois",
                     "ru": "Russian", "tr": "Turkish", "es": "Spanish",
                     "es-mx": "Spanish (MX)", "fr": "French", "de": "German",
                     "it": "Italian", "pl": "Polish", "pt-br": "Portuguese (BR)",
