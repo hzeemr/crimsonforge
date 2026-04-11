@@ -1,0 +1,1064 @@
+[
+  {
+    "path": "gamedata/allygroupinfo.pabgb",
+    "file_name": "allygroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "ally",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/characterappearanceindexinfo.pabgb",
+    "file_name": "characterappearanceindexinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "character",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/characterchange.pabgb",
+    "file_name": "characterchange.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "character",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/charactergroupinfo.pabgb",
+    "file_name": "charactergroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "character",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/characterinfo.pabgb",
+    "file_name": "characterinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "character",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factionrelationgroup.pabgb",
+    "file_name": "factionrelationgroup.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "relation",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/jobinfo.pabgb",
+    "file_name": "jobinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "job",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/materialrelationinfo.pabgb",
+    "file_name": "materialrelationinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "relation",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/mercenaryinfo.pabgb",
+    "file_name": "mercenaryinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "mercenary",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/npcinfo.pabgb",
+    "file_name": "npcinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "npc",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/relationinfo.pabgb",
+    "file_name": "relationinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "relation",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/tribeinfo.pabgb",
+    "file_name": "tribeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Characters & NPCs",
+    "subdomain": "tribe",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/buffinfo.pabgb",
+    "file_name": "buffinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "buff",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/effectinfo.pabgb",
+    "file_name": "effectinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "effect",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameglobaleffectinfo.pabgb",
+    "file_name": "gameglobaleffectinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "effect",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/patterndescriptioninfo.pabgb",
+    "file_name": "patterndescriptioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "pattern",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/quicktimeeventinfo.pabgb",
+    "file_name": "quicktimeeventinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "quicktime",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/skill.pabgb",
+    "file_name": "skill.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "skill",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/skillgroupinfo.pabgb",
+    "file_name": "skillgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "skill",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/skilltreegroupinfo.pabgb",
+    "file_name": "skilltreegroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "skill",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/skilltreeinfo.pabgb",
+    "file_name": "skilltreeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "skill",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/specialmode.pabgb",
+    "file_name": "specialmode.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "specialmode",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/statusgroupinfo.pabgb",
+    "file_name": "statusgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "status",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/statusinfo.pabgb",
+    "file_name": "statusinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "status",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/vibratepatterninfo.pabgb",
+    "file_name": "vibratepatterninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Combat & Skills",
+    "subdomain": "pattern",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/faction.pabgb",
+    "file_name": "faction.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factiongroup.pabgb",
+    "file_name": "factiongroup.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factionnode.pabgb",
+    "file_name": "factionnode.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factionnodespawninfo.pabgb",
+    "file_name": "factionnodespawninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factionspawndatainfo.pabgb",
+    "file_name": "factionspawndatainfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/factionwaypoint.pabgb",
+    "file_name": "factionwaypoint.pabgb",
+    "extension": ".pabgb",
+    "domain": "Factions",
+    "subdomain": "faction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/actionpointinfo.pabgb",
+    "file_name": "actionpointinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "actionpoint",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/autospawnfilterinfo.pabgb",
+    "file_name": "autospawnfilterinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "autospawn",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/detectdetailinfo.pabgb",
+    "file_name": "detectdetailinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "detect",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/detectinfo.pabgb",
+    "file_name": "detectinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "detect",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/detectreactioninfo.pabgb",
+    "file_name": "detectreactioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "detect",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/formationinfo.pabgb",
+    "file_name": "formationinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "formation",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameplaytrigger.pabgb",
+    "file_name": "gameplaytrigger.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gameplay",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameplayvariableinfo.pabgb",
+    "file_name": "gameplayvariableinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gameplay",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gimmickeventtableinfo.pabgb",
+    "file_name": "gimmickeventtableinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gimmick",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gimmickgateconnection.pabgb",
+    "file_name": "gimmickgateconnection.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gimmick",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gimmickgateinfo.pabgb",
+    "file_name": "gimmickgateinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gimmick",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gimmickgroupinfo.pabgb",
+    "file_name": "gimmickgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gimmick",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gimmickinfo.pabgb",
+    "file_name": "gimmickinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "gimmick",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/globalgameevent.pabgb",
+    "file_name": "globalgameevent.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "globalgameevent",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/globalgameeventgroup.pabgb",
+    "file_name": "globalgameeventgroup.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "globalgameevent",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/interactioninfo.pabgb",
+    "file_name": "interactioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "interaction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/sequencerspawninfo.pabgb",
+    "file_name": "sequencerspawninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "spawn",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/spawningpoolautospawninfo.pabgb",
+    "file_name": "spawningpoolautospawninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Gameplay & Spawning",
+    "subdomain": "autospawn",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/crafttoolgroupinfo.pabgb",
+    "file_name": "crafttoolgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "craft",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/crafttoolinfo.pabgb",
+    "file_name": "crafttoolinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "craft",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/dropsetinfo.pabgb",
+    "file_name": "dropsetinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "drop",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/equipslotinfo.pabgb",
+    "file_name": "equipslotinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "equip",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/equiptypeinfo.pabgb",
+    "file_name": "equiptypeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "equip",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/inventory.pabgb",
+    "file_name": "inventory.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "inventory",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/itemgroupinfo.pabgb",
+    "file_name": "itemgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "item",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/iteminfo.pabgb",
+    "file_name": "iteminfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "item",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/itemuseinfo.pabgb",
+    "file_name": "itemuseinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "item",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/reserveslot.pabgb",
+    "file_name": "reserveslot.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "reserve",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/royalsupply.pabgb",
+    "file_name": "royalsupply.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "royalsupply",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/socketgroupinfo.pabgb",
+    "file_name": "socketgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "socket",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/socketinfo.pabgb",
+    "file_name": "socketinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "socket",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/storeinfo.pabgb",
+    "file_name": "storeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Items & Economy",
+    "subdomain": "store",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/dyecolorgroupinfo.pabgb",
+    "file_name": "dyecolorgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "dye",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/elementalmaterialinfo.pabgb",
+    "file_name": "elementalmaterialinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "material",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/materialblooddecalinfo.pabgb",
+    "file_name": "materialblooddecalinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "material",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/materialmatchinfo.pabgb",
+    "file_name": "materialmatchinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "material",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/partprefabdyeslotinfo.pabgb",
+    "file_name": "partprefabdyeslotinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "dye",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/partprefabdyetexturepalleteinfo.pabgb",
+    "file_name": "partprefabdyetexturepalleteinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Materials & Appearance",
+    "subdomain": "dye",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/actionrestrictionorderinfo.pabgb",
+    "file_name": "actionrestrictionorderinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/aiactionattributeinfo.pabgb",
+    "file_name": "aiactionattributeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/aieventtableinfo.pabgb",
+    "file_name": "aieventtableinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/aimovespeedinfo.pabgb",
+    "file_name": "aimovespeedinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/board.pabgb",
+    "file_name": "board.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/breakableobjectinfo.pabgb",
+    "file_name": "breakableobjectinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/categorygroupinfo.pabgb",
+    "file_name": "categorygroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/categoryinfo.pabgb",
+    "file_name": "categoryinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/conditioninfo.pabgb",
+    "file_name": "conditioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/frameeventattrgroupinfo.pabgb",
+    "file_name": "frameeventattrgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameeventhandler.pabgb",
+    "file_name": "gameeventhandler.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/minigamedatainfo.pabgb",
+    "file_name": "minigamedatainfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/multichangeinfo.pabgb",
+    "file_name": "multichangeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/reviepointinfo.pabgb",
+    "file_name": "reviepointinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/validscheduleaction.pabgb",
+    "file_name": "validscheduleaction.pabgb",
+    "extension": ".pabgb",
+    "domain": "Other",
+    "subdomain": "other",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameadvicegroupinfo.pabgb",
+    "file_name": "gameadvicegroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "gameadvice",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/gameadviceinfo.pabgb",
+    "file_name": "gameadviceinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "gameadvice",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/knowledgegroupinfo.pabgb",
+    "file_name": "knowledgegroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "knowledge",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/knowledgeinfo.pabgb",
+    "file_name": "knowledgeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "knowledge",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/missioninfo.pabgb",
+    "file_name": "missioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "mission",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/questgaugeinfo.pabgb",
+    "file_name": "questgaugeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "quest",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/questgroupinfo.pabgb",
+    "file_name": "questgroupinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "quest",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/questinfo.pabgb",
+    "file_name": "questinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "quest",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/wantedinfo.pabgb",
+    "file_name": "wantedinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Quests & Knowledge",
+    "subdomain": "wanted",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/entitlementinfo.pabgb",
+    "file_name": "entitlementinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "System & Platform",
+    "subdomain": "entitlement",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/platformachievementinfo.pabgb",
+    "file_name": "platformachievementinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "System & Platform",
+    "subdomain": "platform",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/vehicleinfo.pabgb",
+    "file_name": "vehicleinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "System & Platform",
+    "subdomain": "vehicle",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/aidialogstringinfo.pabgb",
+    "file_name": "aidialogstringinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "string",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/aidialogtypeinfo.pabgb",
+    "file_name": "aidialogtypeinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "dialog",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/dialogvoiceinfo.pabgb",
+    "file_name": "dialogvoiceinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "dialog",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/failmessageinfo.pabgb",
+    "file_name": "failmessageinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "failmessage",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/keymap.pabgb",
+    "file_name": "keymap.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "keymap",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/localstringinfo.pabgb",
+    "file_name": "localstringinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "string",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/stringinfo.pabgb",
+    "file_name": "stringinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "string",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/uisocialaction.pabgb",
+    "file_name": "uisocialaction.pabgb",
+    "extension": ".pabgb",
+    "domain": "Text, Dialogue & UI",
+    "subdomain": "uisocialaction",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/bitmapposition.pabgb",
+    "file_name": "bitmapposition.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "bitmapposition",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/fieldinfo.pabgb",
+    "file_name": "fieldinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "field",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/fieldlevelnametableinfo.pabgb",
+    "file_name": "fieldlevelnametableinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "field",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/globalstagesequencerinfo.pabgb",
+    "file_name": "globalstagesequencerinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "stage",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/levelactionpointinfo.pabgb",
+    "file_name": "levelactionpointinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "level",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/levelgimmicksceneobjectinfo.pabgb",
+    "file_name": "levelgimmicksceneobjectinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "level",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/levelinfo.pabgb",
+    "file_name": "levelinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "level",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/regioninfo.pabgb",
+    "file_name": "regioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "region",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/stageinfo.pabgb",
+    "file_name": "stageinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "stage",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/sublevelinfo.pabgb",
+    "file_name": "sublevelinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "level",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/terrainregionautospawninfo.pabgb",
+    "file_name": "terrainregionautospawninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "region",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/terrainregionnaviinfo.pabgb",
+    "file_name": "terrainregionnaviinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "region",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/triggerregioninfo.pabgb",
+    "file_name": "triggerregioninfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "region",
+    "has_header_pair": true,
+    "package_group": "0008"
+  },
+  {
+    "path": "gamedata/uimaptextureinfo.pabgb",
+    "file_name": "uimaptextureinfo.pabgb",
+    "extension": ".pabgb",
+    "domain": "World & Map",
+    "subdomain": "uimap",
+    "has_header_pair": true,
+    "package_group": "0008"
+  }
+]

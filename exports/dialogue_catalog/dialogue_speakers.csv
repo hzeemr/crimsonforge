@@ -1,0 +1,31 @@
+﻿speaker_key,speaker_display,speaker_name,speaker_bucket,speaker_confidence,line_count,conversation_count,family_count,story_groups
+AI Group,AI Group,,AI Group,family,16534,33,1,AI Dialogue
+AI NPC,AI NPC,,AI NPC,family,1180,22,1,AI Dialogue
+BOSS,BOSS,,Boss,role,11,1,1,Reeddevil
+Boss 00,Boss 00,,Boss,role,988,100,67,Ancientpeople; Ancientstonegolem; Balthazar; Black; Blissredknight; Blissredsentinel; Blood; Bloodcoronation; Caliburn; Circusmachine; Crimsonwingedduke; Crogg; Crowman; Darkking; Deerking; Demeniss; Dragonslayer; Faction; Five; Fortain; Fullplatearmortroll; Gears; Goblin; Goldenarmor; Gregor; Gwenkraver; Hamondbeindel; Hexemarie; Highland; Intro; Karanda; Karzul; Knightcatfish; Lanford; Loppet; Ludvig; Marni; Marnitank; Mask; Minegolem; Mjordin; Norhernwarrior; Northernwarrior; Orcumer; Penance; Praevus; Primus; Priscus; Ragingtempest; Reeddevil; Rumsxo; Samuel; Senia; Silenthulkingkoo; Silver; Silverwolf; Sizlek; Skullknight; Splithorn; Storm; Tarandus; Thefaceless; Three; Titan; Walterbliss; Whitebear; Witch
+Boss 01,Boss 01,,Boss,role,29,5,5,Bloodcoronation; Ludvig; Mjordin; Reeddevil; Titan
+Boss 1400,Boss 1400,,Boss,role,6,1,1,Splithorn
+the forgotten general,the forgotten general,the forgotten general,Boss,scene_character,2,1,1,Okuro
+Enemy 00,Enemy 00,,Enemy,role,345,116,25,Black; Blissredknight; Bloodcoronation; Caliburn; Crimsonwingedduke; Crowman; Dragonslayer; Extinguishedfire; Faction; Goblin; Greywolf; Intro; Ludvig; M11m05; Mjordin; Node Scene; One-Time Quest; Orcumer; Pailoon; Reeddevil; Silver; Silverwolf; Splithorn; Storm; Trolluniversity
+Enemy 01,Enemy 01,,Enemy,role,14,9,4,Faction; Intro; Mjordin; Node Scene
+Enemy 02,Enemy 02,,Enemy,role,3,1,1,Faction
+Enemy Target 0,Enemy Target 0,,Enemy,role,53,9,1,One-Time Quest
+Global Game Track,Global Game Track,,Global Track,role,1015,126,59,Ancientpeople; Ancientstonegolem; Basecamp; Black; Blissredknight; Bloodcoronation; Caliburn; Carriagefence; Crimsonwingedduke; Crogg; Crowman; Deerking; Demeniss; Dragonslayer; Epilogue; Faction; Five; Fullplatearmortroll; Gears; Goblin; Goldenarmor; Greymanecamp; Greywolf; Gwenkraver; Hamondbeindel; Hexemarie; Imp; Intro; Karzul; Knightcatfish; Ludvig; Marni; Marnidragon; Marnitank; Mask; Maze; Minegolem; Mjordin; Node Scene; Northernwarrior; Orcumer; Penance; Primus; Redwindtradingassociation; Reeddevil; Samuel; Senia; Shipgrave; Silenthulkingkoo; Silver; Silverwolf; Skullknight; Splithorn; Storm; Thefaceless; Three; Trolluniversity; Whitehorn; Witch
+Narration,Narration,,Narration,role,182,104,59,Ancientpeople; Ancientstonegolem; Black; Blissredsentinel; Blood; Bloodcoronation; Caliburn; Circusmachine; Crowman; Deerking; Delesyian; Demeniss; Deshret; Dragonslayer; Faction; Five; Folorin; Fullplatearmortroll; Giant; Goblin; Goldenarmor; Grace; Gwenkraver; Hernand; Hexemarie; Hyenamolar; Intro; Knightcatfish; Lake; Landspider; Loppet; Ludvig; Marni; Marnidragon; Marnitank; Mask; Maze; Meetalustain; Minegolem; Mjordin; Okuro; Orcumer; Penance; Redfox; Reeddevil; Rumsxo; Samuel; Senia; Silenthulkingkoo; Silver; Spiderqueen; Storm; Three; Titan; Vicious; Walterbliss; Wild; Witch; Wolfmolar
+NPC,NPC,,NPC,role,174,23,15,Black; Cd; Demeniss; Entrance; Faction; Funcnpc; Hernand; Intro; Memory; Minigame; One-Time Quest; Outlawvillag; Shipgrave; Storm; Wolffangs
+NPC 00,NPC 00,,NPC,role,8850,1038,82,Basecamp; Beforewar; Black; Blissredsentinel; Bloodcoronation; Bounty; Caliburn; Calphadecastle; Carriagefence; Cd; Common; Contents; Crime; Crimsonwingedduke; Crowman; Darkmoon; Deerking; Delesyian; Demeniss; Dragonslayer; Enc; Entrance; Epilogue; Extinguishedfire; Faction; Flowerdustbeefarm; Folorin; Fullplatearmortroll; Giant; Goblin; Gorthakiron; Greymane; Greymanecamp; Greywolf; Hawkstoneruins; Hernand; Hexe; Hiddencave; Hotballoon; Hyenamolar; Imp; Intro; Invitemarius; Jewel; Ludvig; M10m04; M11m05; Marnidragon; Mask; Maze; Meetalustain; Memory; Mjordin; Node Scene; Odeck; One-Time Quest; Orcumer; Pailoon; Quest; Red; Redfox; Redwindtradingassociation; Reeddevil; Riventainmonastery; Rumsxo; Shaipresent; Shipgrave; Silver; Silverwolf; Spawnmainroad; Splithorn; Storm; Sunsetvillage; Three; Titan; Trade; Trolluniversity; Vicious; Walterbliss; Whitehorn; Wolf; Wolfmolar
+NPC 01,NPC 01,,NPC,role,2162,248,44,Basecamp; Beforewar; Bloodcoronation; Caliburn; Calphadecastle; Carriagefence; Cd; Crowman; Deerking; Delesyian; Demeniss; Faction; Folorin; Funcnpc; Goblin; Greymanecamp; Greywolf; Hernand; Hexe; Hotballoon; Hyenamolar; Imp; Intro; Invitemarius; Ludvig; M10m04; Marnidragon; Meetalustain; Memory; Mjordin; Node Scene; One-Time Quest; Pailoon; Quest; Redfox; Reeddevil; Shipgrave; Silver; Silverwolf; Splithorn; Storm; Titan; Trolluniversity; Wolfmolar
+NPC 02,NPC 02,,NPC,role,337,38,17,Basecamp; Bloodcoronation; Caliburn; Deerking; Faction; Greymane; Greymanecamp; Greywolf; Imp; Ludvig; Marnidragon; Mjordin; Node Scene; Reeddevil; Silver; Splithorn; Trolluniversity
+NPC 03,NPC 03,,NPC,role,91,10,7,Basecamp; Bloodcoronation; Faction; Imp; Ludvig; Splithorn; Trolluniversity
+NPC 04,NPC 04,,NPC,role,17,3,3,Bloodcoronation; Imp; Ludvig
+NPC 05,NPC 05,,NPC,role,15,2,2,Bloodcoronation; Ludvig
+NPC 06,NPC 06,,NPC,role,3,1,1,Ludvig
+NPC 07,NPC 07,,NPC,role,2,1,1,Ludvig
+NPC 09,NPC 09,,NPC,role,3,2,1,Ludvig
+NPC 11,NPC 11,,NPC,role,3,1,1,Ludvig
+NPC 12,NPC 12,,NPC,role,6,2,1,Ludvig
+NPC 13,NPC 13,,NPC,role,5,1,1,Ludvig
+NPC 14,NPC 14,,NPC,role,5,1,1,Ludvig
+Player,Player,,Player,role,1692,448,62,Airplane; Basecamp; Beforewar; Black; Bloodcoronation; Caliburn; Calphadecastle; Cd; Crimsonwingedduke; Crowman; Deerking; Demeniss; Dragon; Dragonarmor; Dragonslayer; Enc; Entrance; Epilogue; Extinguishedfire; Faction; Flowerdustbeefarm; Folorin; Fullplatearmortroll; Gimmick; Goblin; Grace; Greymane; Greymanecamp; Greywolf; Hawkstoneruins; Hernand; Hexe; Hexemarie; Imp; Intro; Invitemarius; Landspider; Ludvig; Marnidragon; Mask; Maze; Meetalustain; Minigame; Mjordin; Node Scene; Odeck; Okuro; Orcumer; Quest; Redfox; Reeddevil; Rumsxo; Shipgrave; Silver; Silverwolf; Spawnmainroad; Splithorn; Three; Titan; Trolluniversity; Whitehorn; Wolfmolar
+Quest NPC,Quest NPC,,Quest NPC,family,19959,12,1,Quest Dialogue
+Subtitle Group,Subtitle Group,,Subtitle Group,role,11,1,1,Epilogue

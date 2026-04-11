@@ -16,18 +16,101 @@ Features:
 
 import os
 import tempfile
-from enum import Enum
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QSplitter, QTableView, QHeaderView, QPlainTextEdit,
     QAbstractItemView, QApplication, QMenu, QSlider, QListWidget,
     QListWidgetItem, QGroupBox, QFormLayout, QCheckBox, QSpinBox,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QCompleter,
 )
 from PySide6.QtCore import (
     Qt, Signal, QTimer, QAbstractTableModel, QModelIndex,
 )
 from PySide6.QtGui import QColor
+
+# ── OmniVoice Supported Languages (Extracted from OmniVoice_api.md) ──
+OMNIVOICE_LANGUAGES = [
+    'Auto', 'Abadi', 'Abkhazian', 'Abron', 'Abua', 'Adamawa Fulfulde', 'Adyghe', 'Afade', 'Afrikaans', 'Agwagwune',
+    'Aja (Benin)', 'Akebu', 'Alago', 'Albanian', 'Algerian Arabic', 'Algerian Saharan Arabic', 'Ambo-Pasco Quechua',
+    'Ambonese Malay', 'Amdo Tibetan', 'Amharic', 'Anaang', 'Angika', 'Antankarana Malagasy', 'Aragonese',
+    'Arbëreshë Albanian', 'Arequipa-La Unión Quechua', 'Armenian', 'Ashe', 'Ashéninka Perené', 'Askopan',
+    'Assamese', 'Asturian', 'Atayal', 'Awak', 'Ayacucho Quechua', 'Azerbaijani', 'Baatonum', 'Bacama', 'Bade', 'Bafia',
+    'Bafut', 'Bagirmi Fulfulde', 'Bago-Kusuntu', 'Baharna Arabic', 'Bakoko', 'Balanta-Ganja', 'Balti', 'Bamenyam',
+    'Bamun', 'Bangwinji', 'Banjar', 'Bankon', 'Baoulé', 'Bara Malagasy', 'Barok', 'Basa (Cameroon)', 'Basa (Nigeria)',
+    'Bashkir', 'Basque', 'Batak Mandailing', 'Batanga', 'Bateri', 'Bats', 'Bayot', 'Bebele', 'Belarusian', 'Bengali',
+    'Betawi', 'Bhili', 'Bhojpuri', 'Bilur', 'Bima', 'Bodo', 'Boghom', 'Bokyi', 'Bomu', 'Bondei', 'Borgu Fulfulde',
+    'Bosnian', 'Brahui', 'Braj', 'Breton', 'Buduma', 'Buginese', 'Bukharic', 'Bulgarian', 'Bulu (Cameroon)', 'Bundeli',
+    'Bunun', 'Bura-Pabir', 'Burak', 'Burmese', 'Burushaski', 'Cacaloxtepec Mixtec', 'Cajatambo North Lima Quechua',
+    'Cakfem-Mushere', 'Cameroon Pidgin', 'Campidanese Sardinian', 'Cantonese', 'Catalan', 'Cebuano', 'Cen',
+    'Central Kurdish', 'Central Nahuatl', 'Central Pame', 'Central Pashto', 'Central Puebla Nahuatl',
+    'Central Tarahumara', 'Central Yupik', 'Central-Eastern Niger Fulfulde', 'Chadian Arabic', 'Chichewa',
+    'Chichicapan Zapotec', 'Chiga', 'Chimalapa Zoque', 'Chimborazo Highland Quichua', 'Chinese',
+    'Chiquián Ancash Quechua', 'Chitwania Tharu', 'Chokwe', 'Chuvash', 'Cibak', 'Coastal Konjo', 'Copainalá Zoque',
+    'Cornish', 'Corongo Ancash Quechua', 'Croatian', 'Cross River Mbembe', 'Cuyamecalco Mixtec', 'Czech', 'Dadiya',
+    'Dagbani', 'Dameli', 'Danish', 'Dargwa', 'Dazaga', 'Deccan', 'Degema', 'Dera (Nigeria)', 'Dghwede', 'Dhatki',
+    'Dhivehi', 'Dhofari Arabic', 'Dijim-Bwilim', 'Dogri', 'Domaaki', 'Dotyali', 'Duala', 'Dutch', 'DũYa', 'Dyula',
+    'Eastern Balochi', 'Eastern Bolivian Guaraní', 'Eastern Egyptian Bedawi Arabic', 'Eastern Krahn', 'Eastern Mari',
+    'Eastern Yiddish', 'Ebrié', 'Eggon', 'Egyptian Arabic', 'Ejagham', 'Eleme', 'Eloyi', 'Embu', 'English', 'Erzya',
+    'Esan', '開通', 'Estonian', 'Eton (Cameroon)', 'Ewondo', 'Extremaduran', 'Fang (Equatorial Guinea)', 'Fanti',
+    'Farefare', 'Fe\'fe\'', 'Filipino', 'Filomena Mata-Coahuitlán Totonac', 'Finnish', 'Fipa', 'French', 'Fulah',
+    'Galician', 'Gambian Wolof', 'Ganda', 'Garhwali', 'Gawar-Bati', 'Gawri', 'Gbagyi', 'Gbari', 'Geji', 'Gen',
+    'Georgian', 'German', 'Geser-Gorom', 'Gheg Albanian', 'Ghomálá\'', 'Gidar', 'Glavda', 'Goan Konkani', 'Goaria',
+    'Goemai', 'Gola', 'Greek', 'Guarani', 'Guduf-Gava', 'Guerrero Amuzgo', 'Gujarati', 'Gujari', 'Gulf Arabic',
+    'Gurgula', 'Gusii', 'Gusilay', 'Gweno', 'Güilá Zapotec', 'Hadothi', 'Hahon', 'Haitian', 'Hakha Chin', 'Hakö',
+    'Halia', 'Hausa', 'Hawaiian', 'Hazaragi', 'Hebrew', 'Hemba', 'Herero', 'Highland Konjo', 'Hijazi Arabic', 'Hindi',
+    'Huarijio', 'Huautla Mazatec', 'Huaxcaleca Nahuatl', 'Huba', 'Huitepec Mixtec', 'Hula', 'Hungarian',
+    'Hunjara-Kaina Ke', 'Hwana', 'Ibibio', 'Icelandic', 'Idakho-Isukha-Tiriki', 'Idoma', 'Igbo', 'Igo', 'Ikposo',
+    'Ikwere', 'Imbabura Highland Quichua', 'Indonesian', 'Indus Kohistani',
+    'Interlingua (International Auxiliary Language Association)', 'Inupiaq', 'Irish', 'Iron Ossetic', 'Isekiri',
+    'Isoko', 'Italian', 'Ito', 'Itzá', 'Ixtayutla Mixtec', 'Izon', 'Jambi Malay', 'Japanese', 'Jaqaru', 'Jauja Wanca Quechua',
+    'Jaunsari', 'Javanese', 'Jiba', 'Jju', 'Judeo-Moroccan Arabic', 'Juxtlahuaca Mixtec', 'Kabardian', 'Kabras',
+    'Kabuverdianu', 'Kabyle', 'Kachi Koli', 'Kairak', 'Kalabari', 'Kalasha', 'Kalenjin', 'Kalkoti', 'Kamba', 'Kamo',
+    'Kanauji', 'Kanembu', 'Kannada', 'Karekare', 'Kashmiri', 'Kathoriya Tharu', 'Kati', 'Kazakh', 'Keiyo', 'Khams Tibetan',
+    'Khana', 'Khetrani', 'Khmer', 'Khowar', 'Kinga', 'Kinnauri', 'Kinyarwanda', 'Kirghiz', 'Kirya-Konzəl', 'Kochila Tharu',
+    'Kohistani Shina', 'Kohumono', 'Kok Borok', 'Kol (Papua New Guinea)', 'Kom (Cameroon)', 'Koma', 'Konkani', 'Konzo',
+    'Korean', 'Korwa', 'Kota (India)', 'Koti', 'Kuanua', 'Kuanyama', 'Kui (India)', 'Kulung (Nigeria)', 'Kuot', 'Kushi',
+    'Kwambi', 'Kwasio', 'Lala-Roba', 'Lamang', 'Lao', 'Larike-Wakasihu', 'Lasi', 'Latgalian', 'Latvian', 'Levantine Arabic',
+    'Liana-Seti', 'Liberia Kpelle', 'Liberian English', 'Libyan Arabic', 'Ligurian', 'Lijili', 'Lingala', 'Lithuanian',
+    'Loarki', 'Logooli', 'Logudorese Sardinian', 'Loja Highland Quichua', 'Loloda', 'Longuda', 'Loxicha Zapotec',
+    'Luba-Lulua', 'Luo', 'Lushai', 'Luxembourgish', 'Maasina Fulfulde', 'Maba (Chad)', 'Macedo-Romanian', 'Macedonian',
+    'Mada (Cameroon)', 'Mafa', 'Maithili', 'Malay', 'Malayalam', 'Mali', 'Malinaltepec Me\'phaa', 'Maltese', 'Mandara',
+    'Mandjak', 'Manggarai', 'Manipuri', 'Mansoanka', 'Manx', 'Maori', 'Marathi', 'Marghi Central', 'Marghi South',
+    'Maria (India)', 'Marwari (Pakistan)', 'Masana', 'Masikoro Malagasy', 'Matsés', 'Mazaltepec Zapotec',
+    'Mazatlán Mazatec', 'Mazatlán Mixe', 'Mbe', 'Mbo (Cameroon)', 'Mbum', 'Medumba', 'Mekeo', 'Meru', 'Mesopotamian Arabic',
+    'Mewari', 'Min Nan Chinese', 'Mingrelian', 'Mitlatongo Mixtec', 'Miya', 'Mokpwe', 'Moksha', 'Mom Jango', 'Mongolian',
+    'Moroccan Arabic', 'Motu', 'Mpiemo', 'Mpumpong', 'Mundang', 'Mungaka', 'Musey', 'Musgu', 'Musi', 'Naba', 'Najdi Arabic',
+    'Nalik', 'Nawdm', 'Ndonga', 'Neapolitan', 'Nepali', 'Ngamo', 'Ngas', 'Ngiemboon', 'Ngizim', 'Ngomba', 'Ngombale',
+    'Nigerian Fulfulde', 'Nigerian Pidgin', 'Nimadi', 'Nobiin', 'North Mesopotamian Arabic', 'North Moluccan Malay',
+    'Northern Betsimisaraka Malagasy', 'Northern Hindko', 'Northern Kurdish', 'Northern Pame', 'Northern Pashto',
+    'Northern Uzbek', 'Northwest Gbaya', 'Norwegian', 'Norwegian Bokmål', 'Norwegian Nynorsk', 'Notsi', 'Nyankpa',
+    'Nyungwe', 'Nzanyi', 'Nüpode Huitoto', 'Occitan', 'Od', 'Odia', 'Odual', 'Omani Arabic', 'Orizaba Nahuatl', 'Orma',
+    'Ormuri', 'Oromo', 'Pahari-Potwari', 'Paiwan', 'Panjabi', 'Papuan Malay', 'Parkari Koli', 'Pedi', 'Pero', 'Persian',
+    'Petats', 'Phalura', 'Piemontese', 'Piya-Kwonci', 'Plateau Malagasy', 'Polish', 'Poqomam', 'Portuguese', 'Pulaar',
+    'Pular', 'Puno Quechua', 'Pushto', 'Pökoot', 'Qaqet', 'Quiotepec Chinantec', 'Rana Tharu', 'Rangi', 'Rapoisi',
+    'Ratahan', 'Rayón Zoque', 'Romanian', 'Romansh', 'Rombo', 'Rotokas', 'Rukai', 'Russian', 'Sacapulteco',
+    'Saidi Arabic', 'Sakalava Malagasy', 'Sakizaya', 'Saleman', 'Samba Daka', 'Samba Leko', 'San Felipe Otlaltepec Popoloca',
+    'San Francisco Del Mar Huave', 'San Juan Atzingo Popoloca', 'San Martín Itunyoso Triqui', 'San Miguel El Grande Mixtec',
+    'Sansi', 'Sanskrit', 'Santa Ana de Tusi Pasco Quechua', 'Santa Catarina Albarradas Zapotec', 'Santali',
+    'Santiago del Estero Quichua', 'Saposa', 'Saraiki', 'Sardinian', 'Saya', 'Sediq', 'Serbian', 'Seri', 'Shina', 'Shona',
+    'Siar-Lak', 'Sibe', 'Sicilian', 'Sihuas Ancash Quechua', 'Sikkimese', 'Sinaugoro', 'Sindhi', 'Sindhi Bhil', 'Sinhala',
+    'Sinicahua Mixtec', 'Sipacapense', 'Siwai', 'Slovak', 'Slovenian', 'Solos', 'Somali', 'Soninke', 'South Giziga',
+    'South Ucayali Ashéninka', 'Southeastern Nochixtlán Mixtec', 'Southern Betsimisaraka Malagasy', 'Southern Pashto',
+    'Southern Pastaza Quechua', 'Soyaltepec Mazatec', 'Spanish', 'Standard Arabic', 'Standard Moroccan Tamazight',
+    'Sudanese Arabic', 'Sulka', 'Svan', 'Swahili', 'Swedish', 'Tae\'', 'Tahaggart Tamahaq', 'Taita', 'Tajik', 'Tamil',
+    'Tandroy-Mahafaly Malagasy', 'Tangale', 'Tanosy Malagasy', 'Tarok', 'Tatar', 'Tedaga', 'Telugu', 'Tem', 'Teop',
+    'Tepeuxila Cuicatec', 'Tepinapa Chinantec', 'Tera', 'Terei', 'Termanu', 'Tesaka Malagasy', 'Tetelcingo Nahuatl',
+    'Teutila Cuicatec', 'Thai', 'Tibetan', 'Tidaá Mixtec', 'Tidore', 'Tigak', 'Tigre', 'Tigrinya', 'Tilquiapan Zapotec',
+    'Tinputz', 'Tlacoapa Me\'phaa', 'Tlacoatzintepec Chinantec', 'Tlingit', 'Toki Pona', 'Tomoip', 'Tondano', 'Tonsea',
+    'Tooro', 'Torau', 'Torwali', 'Tsimihety Malagasy', 'Tsotso', 'Tswana', 'Tugen', 'Tuki', 'Tula', 'Tulu', 'Tunen',
+    'Tungag', 'Tunisian Arabic', 'Tupuri', 'Turkana', 'Turkish', 'Turkmen', 'Tututepec Mixtec', 'Twi', 'Ubaghara', 'Uighur',
+    'Ukrainian', 'Umbundu', 'Upper Sorbian', 'Urdu', 'Ushojo', 'Uzbek', 'Vai', 'Vietnamese', 'Votic', 'Võro', 'Waci Gbe',
+    'Wadiyara Koli', 'Waja', 'Wakhi', 'Wanga', 'Wapan', 'Warji', 'Welsh', 'Wemale', 'Western Frisian',
+    'Western Highland Purepecha', 'Western Juxtlahuaca Mixtec', 'Western Maninkakan', 'Western Mari',
+    'Western Niger Fulfulde', 'Western Panjabi', 'Wolof', 'Wuzlam', 'Xanaguía Zapotec', 'Xhosa', 'Yace', 'Yakut',
+    'Yalahatan', 'Yanahuanca Pasco Quechua', 'Yangben', 'Yaqui', 'Yauyos Quechua', 'Yekhee', 'Yiddish', 'Yidgha',
+    'Yoruba', 'Yutanduchi Mixtec', 'Zacatlán-Ahuacatlán-Tepetzintla Nahuatl', 'Zarma', 'Zaza', 'Zulu', 'Ömie'
+]
+
 
 from core.vfs_manager import VfsManager
 from core.pamt_parser import PamtFileEntry
@@ -57,8 +140,9 @@ _COL_CATEGORY = 2
 _COL_TEXT = 3
 _COL_SIZE = 4
 _COL_NPC = 5
-_COL_COUNT = 6
-_HEADERS = ["File", "Lang", "Category", "Text", "Size", "NPC Voice"]
+_COL_LOCATION = 6
+_COL_COUNT = 7
+_HEADERS = ["File", "Lang", "Category", "Text", "Size", "NPC Voice", "Location"]
 
 
 class _AudioModel(QAbstractTableModel):
@@ -134,7 +218,10 @@ class _AudioModel(QAbstractTableModel):
             if col == _COL_FILE:
                 return os.path.basename(e.entry.path)
             elif col == _COL_LANG:
-                return e.voice_lang.upper() if e.voice_lang else ""
+                lang = e.voice_lang.lower() if e.voice_lang else ""
+                if lang == "ja":
+                    return "CH"
+                return lang.upper()
             elif col == _COL_CATEGORY:
                 return e.category
             elif col == _COL_TEXT:
@@ -143,6 +230,8 @@ class _AudioModel(QAbstractTableModel):
                 return format_file_size(e.entry.orig_size)
             elif col == _COL_NPC:
                 return e.voice_prefix
+            elif col == _COL_LOCATION:
+                return e.entry.paz_file
 
         elif role == Qt.ForegroundRole:
             if col == _COL_LANG:
@@ -152,7 +241,11 @@ class _AudioModel(QAbstractTableModel):
                 return QColor("#a6e3a1")
 
         elif role == Qt.ToolTipRole:
-            lines = [e.entry.path, f"Key: {e.paloc_key}"]
+            lines = [
+                f"Game Path: {e.entry.path}",
+                f"Archive: {e.entry.paz_file}",
+                f"Key: {e.paloc_key}"
+            ]
             if e.text_original:
                 lines.append(f"Text: {e.text_original[:200]}")
             if e.npc_gender:
@@ -177,6 +270,8 @@ class _AudioModel(QAbstractTableModel):
             self._filtered.sort(key=lambda i: a[i].entry.orig_size, reverse=rev)
         elif column == _COL_NPC:
             self._filtered.sort(key=lambda i: a[i].voice_prefix, reverse=rev)
+        elif column == _COL_LOCATION:
+            self._filtered.sort(key=lambda i: a[i].entry.paz_file, reverse=rev)
         self.endResetModel()
 
     @property
@@ -216,7 +311,7 @@ class AudioTab(QWidget):
         self._lang_filter = QComboBox()
         self._lang_filter.addItem(ALL_LANGUAGES, "")
         self._lang_filter.addItem("Korean (KO)", "ko")
-        self._lang_filter.addItem("Japanese (JA)", "ja")
+        self._lang_filter.addItem("Chinois (CH)", "ja")
         self._lang_filter.addItem("English (EN)", "en")
         self._lang_filter.currentIndexChanged.connect(lambda _: self._apply_filter())
         self._lang_filter.setMinimumWidth(120)
@@ -271,12 +366,15 @@ class AudioTab(QWidget):
         self._view.verticalHeader().setVisible(False)
         self._view.verticalHeader().setDefaultSectionSize(22)
         self._view.horizontalHeader().setSectionResizeMode(_COL_FILE, QHeaderView.Interactive)
-        self._view.horizontalHeader().setSectionResizeMode(_COL_TEXT, QHeaderView.Stretch)
+        self._view.horizontalHeader().setSectionResizeMode(_COL_TEXT, QHeaderView.Interactive)
         self._view.setColumnWidth(_COL_FILE, 280)
         self._view.setColumnWidth(_COL_LANG, 40)
         self._view.setColumnWidth(_COL_CATEGORY, 120)
+        self._view.setColumnWidth(_COL_TEXT, 400)
         self._view.setColumnWidth(_COL_SIZE, 60)
         self._view.setColumnWidth(_COL_NPC, 140)
+        self._view.setColumnWidth(_COL_LOCATION, 500)
+        self._view.horizontalHeader().setSectionResizeMode(_COL_LOCATION, QHeaderView.Interactive)
         self._view.clicked.connect(self._on_row_clicked)
         self._view.setContextMenuPolicy(Qt.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._show_context_menu)
@@ -326,9 +424,28 @@ class AudioTab(QWidget):
 
         rl.addWidget(QLabel("TTS Generator"))
 
+        # Style for dropdown arrows to match user request (#87CEFA)
+        combo_style = """
+            QComboBox::drop-down {
+                background-color: #87CEFA;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+                width: 24px;
+            }
+            QComboBox::down-arrow {
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #1e1e2e;
+                width: 0;
+                height: 0;
+                margin-top: 2px;
+            }
+        """
+
         pr = QHBoxLayout()
         pr.addWidget(QLabel("Provider:"))
         self._tts_provider = QComboBox()
+        self._tts_provider.setStyleSheet(combo_style)
         self._tts_provider.currentIndexChanged.connect(self._on_tts_provider_changed)
         pr.addWidget(self._tts_provider, 1)
         rl.addLayout(pr)
@@ -337,6 +454,7 @@ class AudioTab(QWidget):
         mr.addWidget(QLabel("Model:"))
         self._tts_model = QComboBox()
         self._tts_model.setEditable(True)
+        self._tts_model.setStyleSheet(combo_style)
         mr.addWidget(self._tts_model, 1)
         self._tts_refresh_models_btn = QPushButton("Refresh")
         self._tts_refresh_models_btn.setFixedWidth(55)
@@ -352,6 +470,7 @@ class AudioTab(QWidget):
         vr.addWidget(QLabel("Voice:"))
         self._voice_combo = QComboBox()
         self._voice_combo.setEditable(True)
+        self._voice_combo.setStyleSheet(combo_style)
         vr.addWidget(self._voice_combo, 1)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setFixedWidth(55)
@@ -363,13 +482,19 @@ class AudioTab(QWidget):
         lr.addWidget(QLabel("Language:"))
         self._tts_lang = QComboBox()
         self._tts_lang.setEditable(True)
-        self._tts_lang.addItems([
-            "Auto",
-            "en-US", "en-GB", "ar-SA", "ko-KR", "ja-JP", "zh-CN",
-            "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ru-RU",
-        ])
+        self._tts_lang.setStyleSheet(combo_style)
+        # Default starter list, will be populated by _refresh_provider_specific_ui
+        self._tts_lang.addItems(["Auto", "en-US", "ko-KR", "ja-JP", "zh-CN"])
         self._tts_lang.setCurrentText("Auto")
         self._tts_lang.currentTextChanged.connect(lambda _: self._refresh_tts_voices())
+        self._tts_lang.currentTextChanged.connect(self._on_tts_lang_changed)
+        
+        # Make language dropdown searchable/filterable
+        self._tts_lang.setInsertPolicy(QComboBox.NoInsert)
+        if self._tts_lang.completer():
+            self._tts_lang.completer().setCompletionMode(QCompleter.PopupCompletion)
+            self._tts_lang.completer().setFilterMode(Qt.MatchContains)
+            
         lr.addWidget(self._tts_lang, 1)
         rl.addLayout(lr)
 
@@ -477,6 +602,66 @@ class AudioTab(QWidget):
         self._omnivoice_class_temp.setSingleStep(0.1)
         self._omnivoice_class_temp.setValue(float(self._config.get("tts.omnivoice_class_temperature", 0.0)))
         adv_form.addRow("Class Temp:", self._omnivoice_class_temp)
+
+        self._omnivoice_gender_use = QCheckBox()
+        self._omnivoice_gender_use.setChecked(bool(self._config.get("tts.omnivoice_gender_use", False)))
+        self._omnivoice_gender = QComboBox()
+        self._omnivoice_gender.addItems(['Auto', 'Male / 男', 'Female / 女'])
+        self._omnivoice_gender.setStyleSheet(combo_style)
+        self._omnivoice_gender.setEnabled(self._omnivoice_gender_use.isChecked())
+        self._omnivoice_gender_use.toggled.connect(self._omnivoice_gender.setEnabled)
+        h1 = QHBoxLayout()
+        h1.addWidget(self._omnivoice_gender_use)
+        h1.addWidget(self._omnivoice_gender)
+        adv_form.addRow("Gender:", h1)
+
+        self._omnivoice_age_use = QCheckBox()
+        self._omnivoice_age_use.setChecked(bool(self._config.get("tts.omnivoice_age_use", False)))
+        self._omnivoice_age = QComboBox()
+        self._omnivoice_age.addItems(['Auto', 'Child / 儿童', 'Teenager / 少年', 'Young Adult / 青年', 'Middle-aged / 中年', 'Elderly / 老年'])
+        self._omnivoice_age.setStyleSheet(combo_style)
+        self._omnivoice_age.setEnabled(self._omnivoice_age_use.isChecked())
+        self._omnivoice_age_use.toggled.connect(self._omnivoice_age.setEnabled)
+        h2 = QHBoxLayout()
+        h2.addWidget(self._omnivoice_age_use)
+        h2.addWidget(self._omnivoice_age)
+        adv_form.addRow("Age:", h2)
+
+        self._omnivoice_pitch_use = QCheckBox()
+        self._omnivoice_pitch_use.setChecked(bool(self._config.get("tts.omnivoice_pitch_use", False)))
+        self._omnivoice_pitch = QComboBox()
+        self._omnivoice_pitch.addItems(['Auto', 'Very Low Pitch / 极低音调', 'Low Pitch / 低音调', 'Moderate Pitch / 中音调', 'High Pitch / 高音调', 'Very High Pitch / 极高音调'])
+        self._omnivoice_pitch.setStyleSheet(combo_style)
+        self._omnivoice_pitch.setEnabled(self._omnivoice_pitch_use.isChecked())
+        self._omnivoice_pitch_use.toggled.connect(self._omnivoice_pitch.setEnabled)
+        h3 = QHBoxLayout()
+        h3.addWidget(self._omnivoice_pitch_use)
+        h3.addWidget(self._omnivoice_pitch)
+        adv_form.addRow("Pitch:", h3)
+
+        self._omnivoice_style_use = QCheckBox()
+        self._omnivoice_style_use.setChecked(bool(self._config.get("tts.omnivoice_style_use", False)))
+        self._omnivoice_style = QComboBox()
+        self._omnivoice_style.addItems(['Auto', 'Whisper / 耳语'])
+        self._omnivoice_style.setStyleSheet(combo_style)
+        self._omnivoice_style.setEnabled(self._omnivoice_style_use.isChecked())
+        self._omnivoice_style_use.toggled.connect(self._omnivoice_style.setEnabled)
+        h4 = QHBoxLayout()
+        h4.addWidget(self._omnivoice_style_use)
+        h4.addWidget(self._omnivoice_style)
+        adv_form.addRow("Style:", h4)
+
+        self._omnivoice_accent_use = QCheckBox()
+        self._omnivoice_accent_use.setChecked(bool(self._config.get("tts.omnivoice_accent_use", False)))
+        self._omnivoice_accent = QComboBox()
+        self._omnivoice_accent.addItems(['Auto', 'American Accent / 美式口音', 'Australian Accent / 澳大利亚口音', 'British Accent / 英国口音', 'Chinese Accent / 中国口音', 'Canadian Accent / 加拿大口音', 'Indian Accent / 印度口音', 'Korean Accent / 韩国口音', 'Portuguese Accent / 葡萄牙口音', 'Russian Accent / 俄罗斯口音', 'Japanese Accent / 日本口音'])
+        self._omnivoice_accent.setStyleSheet(combo_style)
+        self._omnivoice_accent.setEnabled(self._omnivoice_accent_use.isChecked())
+        self._omnivoice_accent_use.toggled.connect(self._omnivoice_accent.setEnabled)
+        h5 = QHBoxLayout()
+        h5.addWidget(self._omnivoice_accent_use)
+        h5.addWidget(self._omnivoice_accent)
+        adv_form.addRow("English Accent:", h5)
         rl.addWidget(self._omnivoice_advanced_group)
 
         rl.addWidget(QLabel("Text:"))
@@ -614,6 +799,34 @@ class AudioTab(QWidget):
         lang = self._current_tts_language_query()
         if not lang:
             return ""
+            
+        # Mapping from OmniVoice list names to internal game codes
+        mapping = {
+            "Korean": "ko",
+            "English": "en",
+            "Japanese": "ja",
+            "Russian": "ru",
+            "Turkish": "tr",
+            "Spanish": "es",
+            "French": "fr",
+            "German": "de",
+            "Italian": "it",
+            "Polish": "pl",
+        }
+        
+        if lang in mapping:
+            return mapping[lang]
+            
+        # Special cases and variations
+        l = lang.lower()
+        if "spanish" in l:
+            return "es-mx" if "mx" in l else "es"
+        if "chinese" in l:
+            return "zh-tw" if "tw" in l else "zh-cn"
+        if "portuguese" in l:
+            return "pt-br"
+            
+        # Fallback to standard BCP-47 split
         return lang.split("-")[0].lower()
 
     def _is_omnivoice_provider(self, provider_id: str = "") -> bool:
@@ -662,6 +875,16 @@ class AudioTab(QWidget):
         self._config.set("tts.omnivoice_clone_mode", self._omnivoice_mode.currentData() or "one_shot")
         self._config.set("tts.omnivoice_profile_name", self._omnivoice_profile_name.text().strip())
         self._config.set("tts.omnivoice_refresh_profile", self._omnivoice_refresh_profile.isChecked())
+        self._config.set("tts.omnivoice_gender", self._omnivoice_gender.currentText())
+        self._config.set("tts.omnivoice_age", self._omnivoice_age.currentText())
+        self._config.set("tts.omnivoice_pitch", self._omnivoice_pitch.currentText())
+        self._config.set("tts.omnivoice_style", self._omnivoice_style.currentText())
+        self._config.set("tts.omnivoice_accent", self._omnivoice_accent.currentText())
+        self._config.set("tts.omnivoice_gender_use", self._omnivoice_gender_use.isChecked())
+        self._config.set("tts.omnivoice_age_use", self._omnivoice_age_use.isChecked())
+        self._config.set("tts.omnivoice_pitch_use", self._omnivoice_pitch_use.isChecked())
+        self._config.set("tts.omnivoice_style_use", self._omnivoice_style_use.isChecked())
+        self._config.set("tts.omnivoice_accent_use", self._omnivoice_accent_use.isChecked())
 
     def _apply_omnivoice_ui_state(self):
         mode = self._config.get("tts.omnivoice_clone_mode", "one_shot")
@@ -671,16 +894,56 @@ class AudioTab(QWidget):
                 break
         self._omnivoice_profile_name.setText(self._config.get("tts.omnivoice_profile_name", ""))
         self._omnivoice_refresh_profile.setChecked(bool(self._config.get("tts.omnivoice_refresh_profile", True)))
+        self._omnivoice_gender.setCurrentText(self._config.get("tts.omnivoice_gender", "Auto"))
+        self._omnivoice_age.setCurrentText(self._config.get("tts.omnivoice_age", "Auto"))
+        self._omnivoice_pitch.setCurrentText(self._config.get("tts.omnivoice_pitch", "Auto"))
+        self._omnivoice_style.setCurrentText(self._config.get("tts.omnivoice_style", "Auto"))
+        self._omnivoice_accent.setCurrentText(self._config.get("tts.omnivoice_accent", "Auto"))
+
+        self._omnivoice_gender_use.setChecked(bool(self._config.get("tts.omnivoice_gender_use", False)))
+        self._omnivoice_age_use.setChecked(bool(self._config.get("tts.omnivoice_age_use", False)))
+        self._omnivoice_pitch_use.setChecked(bool(self._config.get("tts.omnivoice_pitch_use", False)))
+        self._omnivoice_style_use.setChecked(bool(self._config.get("tts.omnivoice_style_use", False)))
+        self._omnivoice_accent_use.setChecked(bool(self._config.get("tts.omnivoice_accent_use", False)))
+
+        # Explicitly apply enabled state based on loaded checkbox values
+        self._omnivoice_gender.setEnabled(self._omnivoice_gender_use.isChecked())
+        self._omnivoice_age.setEnabled(self._omnivoice_age_use.isChecked())
+        self._omnivoice_pitch.setEnabled(self._omnivoice_pitch_use.isChecked())
+        self._omnivoice_style.setEnabled(self._omnivoice_style_use.isChecked())
+        self._omnivoice_accent.setEnabled(self._omnivoice_accent_use.isChecked())
 
     def _refresh_provider_specific_ui(self):
         is_omni = self._is_omnivoice_provider()
         self._omnivoice_clone_group.setVisible(is_omni)
         self._omnivoice_advanced_group.setVisible(is_omni)
+
+        # Update language list based on provider
+        self._tts_lang.blockSignals(True)
+        current = self._tts_lang.currentText()
+        self._tts_lang.clear()
+
+        if is_omni:
+            self._tts_lang.addItems(OMNIVOICE_LANGUAGES)
+        else:
+            self._tts_lang.addItems([
+                "Auto",
+                "en-US", "en-GB", "ar-SA", "ko-KR", "ja-JP", "zh-CN",
+                "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ru-RU",
+            ])
+
+        if current:
+            self._tts_lang.setCurrentText(current)
+        else:
+            self._tts_lang.setCurrentText("Auto")
+        self._tts_lang.blockSignals(False)
+
         if is_omni:
             self._apply_omnivoice_ui_state()
             self._check_omnivoice_server()
         else:
             self._tts_status_label.setText("Status: Ready")
+
 
 
     # ── Filtering ──
@@ -698,6 +961,7 @@ class AudioTab(QWidget):
         ae = self._model.row_at(index.row())
         if ae:
             self._play_and_show(ae)
+            self._update_tts_text_from_selection(ae)
 
     def _play_and_show(self, ae: AudioEntry):
         """Play audio and show linked text."""
@@ -729,14 +993,17 @@ class AudioTab(QWidget):
             # Build text display
             lines = []
             lines.append(f"File: {entry.path}")
-            lines.append(f"Language: {ae.voice_lang.upper()} | Category: {ae.category}")
+            display_lang = ae.voice_lang.upper()
+            if ae.voice_lang.lower() == "ja":
+                display_lang = "CH"
+            lines.append(f"Language: {display_lang} | Category: {ae.category}")
             lines.append(f"NPC: {ae.npc_gender} {ae.npc_class} ({ae.npc_age})")
             lines.append(f"Paloc Key: {ae.paloc_key}")
             lines.append("")
 
             if ae.text_translations:
                 lang_names = {
-                    "ko": "Korean", "en": "English", "ja": "Japanese",
+                    "ko": "Korean", "en": "English", "ja": "Chinois",
                     "ru": "Russian", "tr": "Turkish", "es": "Spanish",
                     "es-mx": "Spanish (MX)", "fr": "French", "de": "German",
                     "it": "Italian", "pl": "Polish", "pt-br": "Portuguese (BR)",
@@ -752,23 +1019,8 @@ class AudioTab(QWidget):
 
             self._text_display.setPlainText("\n".join(lines))
 
-            # Auto-load text into TTS input — use the selected TTS language if available
-            tts_lang = self._tts_lang.currentText().strip()
-            tts_lang_code = tts_lang.split("-")[0].lower() if tts_lang else ""
-            tts_text = ""
-            if ae.text_translations and tts_lang_code:
-                # Try exact match first (e.g. "ar"), then try with region (e.g. "ar-sa")
-                tts_text = ae.text_translations.get(tts_lang_code, "")
-                if not tts_text:
-                    # Try matching lang codes like "es" matching "es-mx"
-                    for lk, lv in ae.text_translations.items():
-                        if lk.startswith(tts_lang_code):
-                            tts_text = lv
-                            break
-            if not tts_text:
-                tts_text = ae.text_original
-            if tts_text:
-                self._tts_text.setPlainText(tts_text)
+            # Manual entry for generation prompt preferred by user
+            # Main prompt (_tts_text) remains empty for user input
 
             self._autofill_omnivoice_context(ae)
 
@@ -1034,10 +1286,33 @@ class AudioTab(QWidget):
         try:
             path = self._ensure_reference_audio_for_entry(ae)
             self._omnivoice_ref_audio.setText(path)
+            
+            # Force auto-fill reference transcript from entry's original text (matching the audio language)
+            ref_text = ae.text_original or ""
+            self._omnivoice_ref_text.setPlainText(ref_text)
+                
             self._autofill_omnivoice_context(ae)
             self._progress.set_status(f"Reference ready: {os.path.basename(path)}")
         except Exception as e:
             show_error(self, "Reference Audio", str(e))
+
+    def _update_tts_text_from_selection(self, ae: AudioEntry = None):
+        if not ae:
+            ae = self._current_audio_entry()
+        if not ae:
+            return
+            
+        # If user hasn't manually typed anything or we are auto-filling...
+        # We'll overwrite the text if it's currently empty or previously auto-filled.
+        # But for simplicity as requested, we'll sync it when clicked.
+        text = self._build_tts_text_for_entry(ae)
+        if text:
+            self._tts_text.setPlainText(text)
+
+    def _on_tts_lang_changed(self, lang: str):
+        ae = self._current_audio_entry()
+        if ae:
+            self._update_tts_text_from_selection(ae)
 
     def _ensure_reference_audio_for_entry(self, ae: AudioEntry) -> str:
         entry = ae.entry
@@ -1076,6 +1351,10 @@ class AudioTab(QWidget):
                 self._omnivoice_ref_audio.setText(self._ensure_reference_audio_for_entry(ae))
             except Exception:
                 pass
+        
+        # Sync reference transcript with current selection's original text
+        self._omnivoice_ref_text.setPlainText(ae.text_original or "")
+
         if not self._omnivoice_profile_name.text().strip():
             self._omnivoice_profile_name.setText(self._suggest_omnivoice_profile_name(ae))
         if not (self._voice_combo.currentText() or "").strip():
@@ -1116,15 +1395,17 @@ class AudioTab(QWidget):
 
     def _build_tts_text_for_entry(self, ae: AudioEntry, language_override: str = "") -> str:
         lang_code = language_override or self._current_tts_language_code()
-        if ae.text_translations and lang_code:
+        if lang_code:
             text = ae.text_translations.get(lang_code, "")
             if not text:
                 for key, value in ae.text_translations.items():
                     if key.startswith(lang_code):
                         text = value
                         break
-            if text:
-                return text
+            # If a specific language was requested but not found, return empty (per user request)
+            return text if text else ""
+            
+        # No specific language requested (Auto), return original text
         return ae.text_original or ""
 
     def _build_omnivoice_options(self, ae: AudioEntry = None, batch_mode: bool = False) -> dict:
@@ -1155,6 +1436,11 @@ class AudioTab(QWidget):
             "t_shift": self._omnivoice_t_shift.value(),
             "position_temperature": self._omnivoice_position_temp.value(),
             "class_temperature": self._omnivoice_class_temp.value(),
+            "param_9": self._omnivoice_gender.currentText() if self._omnivoice_gender_use.isChecked() else "Auto",
+            "param_10": self._omnivoice_age.currentText() if self._omnivoice_age_use.isChecked() else "Auto",
+            "param_11": self._omnivoice_pitch.currentText() if self._omnivoice_pitch_use.isChecked() else "Auto",
+            "param_12": self._omnivoice_style.currentText() if self._omnivoice_style_use.isChecked() else "Auto",
+            "param_13": self._omnivoice_accent.currentText() if self._omnivoice_accent_use.isChecked() else "Auto",
             "response_format": "wav",
             "stream": False,
         }
@@ -1188,7 +1474,7 @@ class AudioTab(QWidget):
     def _generate_tts(self):
         text = self._tts_text.toPlainText().strip()
         if not text:
-            show_error(self, "Error", "Enter text")
+            show_error(self, "TTS Error", "Generate file audio failed, please put text on the text section and try again.")
             return
         if not self._tts_engine:
             return
@@ -1277,8 +1563,13 @@ class AudioTab(QWidget):
             with open(wem_path, "rb") as f:
                 new_data = f.read()
 
+            orig_text = ae.text_original or "[No text linked]"
+            new_text = self._tts_text.toPlainText().strip()
+            
             if not confirm_action(self, "Patch Audio",
                                   f"Replace {entry.path}?\n\n"
+                                  f"Original Dialogue:\n{orig_text[:200]}\n\n"
+                                  f"New TTS Text:\n{new_text[:200]}\n\n"
                                   f"Original: {format_file_size(len(orig_data))} (WEM Vorbis)\n"
                                   f"New: {format_file_size(len(new_data))} (WEM Vorbis)\n\n"
                                   f"The generated audio will be written directly into the game archive."):

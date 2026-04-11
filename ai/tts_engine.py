@@ -853,6 +853,11 @@ class TTSOmniVoice(TTSProviderBase):
             "t_shift": float(options.get("t_shift", 0.1)),
             "position_temperature": float(options.get("position_temperature", 5.0)),
             "class_temperature": float(options.get("class_temperature", 0.0)),
+            "param_9": options.get("param_9", "Auto"),
+            "param_10": options.get("param_10", "Auto"),
+            "param_11": options.get("param_11", "Auto"),
+            "param_12": options.get("param_12", "Auto"),
+            "param_13": options.get("param_13", "Auto"),
         }
         if duration > 0:
             payload["duration"] = duration
@@ -880,6 +885,11 @@ class TTSOmniVoice(TTSProviderBase):
                     "t_shift": str(float(options.get("t_shift", 0.1))),
                     "position_temperature": str(float(options.get("position_temperature", 5.0))),
                     "class_temperature": str(float(options.get("class_temperature", 0.0))),
+                    "param_9": str(options.get("param_9", "Auto")),
+                    "param_10": str(options.get("param_10", "Auto")),
+                    "param_11": str(options.get("param_11", "Auto")),
+                    "param_12": str(options.get("param_12", "Auto")),
+                    "param_13": str(options.get("param_13", "Auto")),
                 }
                 duration = float(options.get("duration", 0.0) or 0.0)
                 if duration > 0:
