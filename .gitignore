@@ -11,6 +11,9 @@ venv/
 build/
 dist/
 
+# Generated exports
+exports/
+
 # Tool caches
 .pytest_cache/
 .mypy_cache/

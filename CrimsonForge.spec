@@ -174,13 +174,16 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_version_str = "v" + __import__('importlib').import_module('version').APP_VERSION
+
 splash = Splash(
     os.path.join(ROOT, 'splash.png'),
     binaries=a.binaries,
     datas=a.datas,
-    text_pos=None,
+    text_pos=(None, 258),
     text_size=12,
-    text_color='#89b4fa',
+    text_color='#a6adc8',
+    text_default=_version_str,
     minify_script=True,
     always_on_top=True,
 )
