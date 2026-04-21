@@ -59,6 +59,20 @@ class ParsedHavok:
     has_animation: bool = False
     has_physics: bool = False
     has_ragdoll: bool = False
+    # April-2026 additions — the information we actually need to warn
+    # modders about when they're about to edit a mesh that has paired
+    # cloth or ragdoll physics.
+    has_cloth: bool = False                       # hkClothData / hkaClothSetupData
+    has_softbody: bool = False                    # hkpSoftBody / hkaiNavMesh
+    has_mesh_shape: bool = False                  # hkpMeshShape — references mesh topology directly
+    rigid_body_count: int = 0                     # distinct hkpRigidBody instances
+    shape_types: list[str] = field(default_factory=list)  # unique shape class names
+    cloth_class_hits: list[str] = field(default_factory=list)  # raw class names that triggered has_cloth
+    # Summary flag: when True, the HKX carries physics that directly
+    # references the paired mesh's topology. Editing that mesh without
+    # regenerating the HKX will almost always break physics (stretching
+    # cloth, collapsed ragdolls, floating collision hulls).
+    binds_to_mesh_topology: bool = False
 
 
 def parse_hkx(data: bytes, filename: str = "") -> ParsedHavok:
@@ -129,11 +143,31 @@ def parse_hkx(data: bytes, filename: str = "") -> ParsedHavok:
                     result.class_names.append(s)
                 off = nul + 1
 
+    # Fallback: real Crimson Desert HKX files (SDK 20240200) sometimes
+    # store class names outside the TSTR section boundary our simple
+    # scanner uses, which leaves class_names empty. Catch everything
+    # that matches the Havok ``hk[pa]Identifier`` naming convention by
+    # scanning the raw bytes. This is strictly additive — we only
+    # append names that TSTR didn't already pick up — and keeps the
+    # risk-assessor working against shipping files without needing a
+    # full Havok type-reflection implementation.
+    _HK_CLASS_RE = re.compile(rb"\b(hk[pacuix][A-Za-z][A-Za-z0-9]{2,60})\b")
+    existing = set(result.class_names)
+    for match in _HK_CLASS_RE.finditer(data):
+        name = match.group(1).decode("ascii", "replace")
+        if name not in existing:
+            existing.add(name)
+            result.class_names.append(name)
+
     # Extract bone names and parent hierarchy from DATA section
     _extract_bones(data, result)
     _extract_parent_indices(data, result)
 
     # Detect content types
+    shape_names: list[str] = []
+    cloth_hits: list[str] = []
+    rigid_body_count = 0
+
     for cls in result.class_names:
         cls_lower = cls.lower()
         if "skeleton" in cls_lower:
@@ -144,6 +178,48 @@ def parse_hkx(data: bytes, filename: str = "") -> ParsedHavok:
             result.has_physics = True
         if "ragdoll" in cls_lower:
             result.has_ragdoll = True
+
+        # Cloth / softbody detection — these are the classes that drive
+        # fuse00_'s "beard stretches to ground" failure mode. When any
+        # of them is present, editing the paired mesh without
+        # regenerating the HKX will break the simulation because the
+        # cloth constraint graph references per-vertex indices.
+        if (
+            "cloth" in cls_lower
+            or "hkacloth" in cls_lower
+            or "hkpcloth" in cls_lower
+        ):
+            result.has_cloth = True
+            cloth_hits.append(cls)
+        if "softbody" in cls_lower:
+            result.has_softbody = True
+
+        # Shape taxonomy. Any class with "meshshape" in it references
+        # vertex / triangle arrays directly — topology change breaks it
+        # regardless of whether cloth is present. Pearl Abyss ships
+        # hknpLegacyCompressedMeshShape alongside the SDK 20240200
+        # hkpMeshShape, so we match both via substring.
+        if "meshshape" in cls_lower:
+            result.has_mesh_shape = True
+        if (cls_lower.startswith("hkp") or cls_lower.startswith("hknp")) and "shape" in cls_lower:
+            if cls not in shape_names:
+                shape_names.append(cls)
+
+        # Rigid-body counting. We can't tell distinct instances from
+        # the TSTR list alone (that only has type names), but we do
+        # want to flag files that carry at least one rigid body. Both
+        # hkp and hknp namespaces appear in shipping files.
+        if "rigidbody" in cls_lower:
+            rigid_body_count = max(rigid_body_count, 1)
+
+    result.shape_types = shape_names
+    result.cloth_class_hits = cloth_hits
+    result.rigid_body_count = rigid_body_count
+    # Topology-binding classes — any of these means editing the paired
+    # mesh is going to desync this HKX.
+    result.binds_to_mesh_topology = (
+        result.has_cloth or result.has_softbody or result.has_mesh_shape
+    )
 
     if result.bones:
         result.has_skeleton = True
@@ -294,3 +370,114 @@ def get_hkx_summary(data: bytes) -> str:
 def is_havok_file(path: str) -> bool:
     """Check if a file is a Havok file."""
     return os.path.splitext(path.lower())[1] == ".hkx"
+
+
+@dataclass
+class HavokEditRisk:
+    """Pre-edit diagnostic for a mesh's paired HKX.
+
+    Populated by ``assess_mesh_edit_risk`` and surfaced in the mod-
+    packaging UI so users get a clear, loud warning before the repack
+    step for cases where editing the mesh will definitely break
+    physics in-game (the flagship symptom being ``fuse00_``'s beard
+    that stretches to the ground after an OBJ round-trip).
+    """
+    severity: str                         # "none" | "warn" | "block"
+    reasons: list[str] = field(default_factory=list)
+    driving_systems: list[str] = field(default_factory=list)  # human labels: "Cloth", "Ragdoll", ...
+
+    @property
+    def is_blocking(self) -> bool:
+        return self.severity == "block"
+
+    @property
+    def is_warning(self) -> bool:
+        return self.severity in ("warn", "block")
+
+    def format_message(self, mesh_path: str = "", hkx_path: str = "") -> str:
+        """Human-readable block suitable for a confirmation dialog."""
+        lines: list[str] = []
+        if self.severity == "none":
+            return ""
+        heading = "Physics desync risk" if self.severity == "warn" else "PHYSICS WILL DESYNC"
+        lines.append(heading)
+        if mesh_path:
+            lines.append(f"  mesh: {mesh_path}")
+        if hkx_path:
+            lines.append(f"  hkx:  {hkx_path}")
+        if self.driving_systems:
+            lines.append(f"  paired HKX drives: {', '.join(self.driving_systems)}")
+        for reason in self.reasons:
+            lines.append(f"  - {reason}")
+        lines.append("")
+        lines.append(
+            "Any vertex add/remove or UV reshuffle in the mesh will break "
+            "the simulation because HKX references mesh topology by index. "
+            "Re-export the HKX from the original rig alongside your mesh, "
+            "or ship the unedited HKX together with the edit."
+        )
+        return "\n".join(lines)
+
+
+def assess_mesh_edit_risk(hkx_data: bytes) -> HavokEditRisk:
+    """Pre-edit check: does this HKX bind to the paired mesh's topology?
+
+    Used by the mesh-sidecar service to loudly warn before the user
+    commits to an edit that would break physics.
+
+    Severity ladder:
+
+      block  — hkpMeshShape or cloth simulation with vertex references;
+               editing mesh topology will almost certainly break the
+               file. Requires HKX regeneration from a DCC tool with
+               the Havok plug-in.
+      warn   — ragdoll or generic rigid-body physics present. Bone
+               hierarchy matters; if the mesh edit preserves bone
+               weights (donor-record path) things usually survive.
+      none   — skeleton or animation only; mesh edits are safe.
+    """
+    risk = HavokEditRisk(severity="none")
+
+    try:
+        hkx = parse_hkx(hkx_data)
+    except Exception as exc:
+        risk.severity = "warn"
+        risk.reasons.append(f"HKX parse failed: {exc}")
+        return risk
+
+    systems: list[str] = []
+    if hkx.has_cloth:
+        systems.append("Cloth")
+    if hkx.has_softbody:
+        systems.append("Softbody")
+    if hkx.has_mesh_shape:
+        systems.append("Mesh collision")
+    if hkx.has_ragdoll:
+        systems.append("Ragdoll")
+    if hkx.rigid_body_count:
+        systems.append(f"Rigid bodies ({hkx.rigid_body_count}+)")
+    risk.driving_systems = systems
+
+    if hkx.binds_to_mesh_topology:
+        risk.severity = "block"
+        if hkx.has_cloth:
+            risk.reasons.append(
+                f"cloth simulation detected ({len(hkx.cloth_class_hits)} cloth class ref(s))"
+            )
+        if hkx.has_softbody:
+            risk.reasons.append("softbody simulation detected")
+        if hkx.has_mesh_shape:
+            risk.reasons.append("hkpMeshShape references mesh vertex/triangle buffers directly")
+        return risk
+
+    if hkx.has_ragdoll or hkx.rigid_body_count:
+        risk.severity = "warn"
+        if hkx.has_ragdoll:
+            risk.reasons.append("ragdoll present — preserve bone hierarchy")
+        if hkx.rigid_body_count:
+            risk.reasons.append(
+                f"rigid bodies present — edits that move bones will displace collision hulls"
+            )
+        return risk
+
+    return risk

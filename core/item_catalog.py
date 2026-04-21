@@ -353,12 +353,26 @@ def _variant_level_from_name(name: str) -> int | None:
     return int(match.group(1))
 
 
+_BODY_ARMOR_SUFFIX_RE = re.compile(r"_armor$")
+_MOUNT_PET_ARMOR_RE = re.compile(r"(?:^|_)(horse|pet)_?armor")
+
+
 def _resolve_raw_type(base_name: str, equip_types: list[str]) -> tuple[str, str, str]:
     for equip_type in equip_types:
         if equip_type in base_name:
             return equip_type, "equiptypeinfo", "high"
 
     lower = base_name.lower()
+
+    # Body/chest armor: names ending in "_Armor" (e.g. "Dartus_Leather_Armor",
+    # "Sir_Catfish_PlateArmor_Armor"). The substring "armor" alone is ambiguous
+    # because it also appears inside compound adjectives like "PlateArmor_Helm",
+    # so we anchor on the trailing "_armor" token. Mount and pet variants are
+    # excluded here so they flow into the specialised HorseArmor / PetArmor
+    # branches of token_map below, which carry the correct slot semantics.
+    if _BODY_ARMOR_SUFFIX_RE.search(lower) and not _MOUNT_PET_ARMOR_RE.search(lower):
+        return "Upperbody", "name:_armor", "medium"
+
     token_map = [
         ("fishingrod", "Tool"),
         ("pickaxe", "Tool"),
@@ -508,11 +522,30 @@ def _classify_non_equipment(base_name: str) -> tuple[str, str, str, str, str]:
     return "Misc", "Unknown", "Unknown", "fallback", "low"
 
 
+# Unambiguous equipment slot suffixes. When an item name ends with one of these,
+# the equipment classifier runs first — otherwise "Dartus_Leather_Armor" falls
+# into "Throwable/Bomb" (because "dart" appears inside "Dartus"), "Yorkey_Fabric_Armor"
+# falls into "Key" (because of "key" inside "Yorkey"), and so on.
+_EQUIP_SLOT_SUFFIX_RE = re.compile(
+    r"_(armor|helm|helmet|hood|crown|cloak|gloves?|gauntlets?|boots?|shoes?|"
+    r"mask|glass(?:es)?|belt|ring|necklace|earring|bracelet)$"
+)
+
+
 def classify_item_name(name: str, equip_types: list[str]) -> tuple[str, str, str, str, str, str]:
     base_name = _normalize_base_name(name)
-    top, category, subcategory, source, confidence = _classify_non_equipment(base_name)
-    if confidence == "high":
-        return top, category, subcategory, subcategory, "Unknown", source
+    lower_base = base_name.lower()
+
+    # Equipment slot suffixes are unambiguous — e.g. "Dartus_Leather_Armor" clearly
+    # ends with "_Armor" and should be an Upperbody item regardless of the fact that
+    # "dart" appears inside "Dartus". Prefer equipment classification for these cases
+    # before falling back to the substring-based non-equipment classifier.
+    prefer_equipment = bool(_EQUIP_SLOT_SUFFIX_RE.search(lower_base))
+
+    if not prefer_equipment:
+        top, category, subcategory, source, confidence = _classify_non_equipment(base_name)
+        if confidence == "high":
+            return top, category, subcategory, subcategory, "Unknown", source
 
     raw_type, raw_source, raw_confidence = _resolve_raw_type(base_name, equip_types)
 

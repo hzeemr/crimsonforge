@@ -1703,268 +1703,6 @@ def transfer_pam_edit_to_pamlod_mesh(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  PAC BUILDER
-# ═══════════════════════════════════════════════════════════════════════
-
-def build_pac(mesh: ParsedMesh, original_data: bytes) -> bytes:
-    """Rebuild a PAC binary from modified mesh + original file data.
-
-    The original PAC is needed to preserve:
-    - Header (magic, version, timestamp)
-    - Section 0 structure (flags, bone data, Havok data)
-    - Non-geometry metadata
-
-    Only vertex positions, UVs, and face indices are replaced.
-    """
-    if not original_data or original_data[:4] != b"PAR ":
-        raise ValueError("Original PAC data required for rebuild")
-
-    # Parse original to get metadata
-    header_size = 80
-    s0_start = header_size
-    flags = struct.unpack_from("<I", original_data, s0_start)[0]
-    n_lods = original_data[s0_start + 4]
-
-    if n_lods == 0 or n_lods > 10:
-        raise ValueError(f"Invalid n_lods: {n_lods}")
-
-    # Read original section offsets
-    off = s0_start + 5
-    orig_lod_offsets = [struct.unpack_from("<I", original_data, off + i * 4)[0] for i in range(n_lods)]
-    off += n_lods * 4
-    orig_split_offsets = [struct.unpack_from("<I", original_data, off + i * 4)[0] for i in range(n_lods)]
-    off += n_lods * 4
-
-    # Compute original section boundaries
-    sorted_offsets = sorted(orig_lod_offsets)
-    orig_boundaries = [header_size] + sorted_offsets + [len(original_data)]
-    orig_sections = [(orig_boundaries[i], orig_boundaries[i + 1])
-                     for i in range(len(orig_boundaries) - 1)]
-
-    # Extract original section 0 content (everything from s0 start to first LOD)
-    orig_s0 = bytearray(original_data[orig_sections[0][0]:orig_sections[0][1]])
-
-    # Parse original submesh descriptors to get metadata we need to preserve
-    orig_mesh = parse_pac(original_data, mesh.path)
-
-    # ── Build LOD data sections ──
-    # We only modify LOD0 (highest quality). Lower LODs get the same data
-    # (simplified — proper LOD generation would decimate the mesh).
-
-    lod0_verts_buf = bytearray()
-    lod0_idx_buf = bytearray()
-
-    for sm_idx, sm in enumerate(mesh.submeshes):
-        bmin, bmax = _compute_bbox(sm.vertices)
-
-        # Build vertex records (stride auto-matched to original)
-        # Detect original stride from original LOD0 section
-        orig_lod0 = orig_sections[-1]
-        orig_lod0_size = orig_lod0[1] - orig_lod0[0]
-        orig_total_verts = sum(
-            s.get("vert_counts", [0])[0] if isinstance(s, dict) else s.vertex_count
-            for s in (orig_mesh.submeshes if orig_mesh.submeshes else [{"vert_counts": [0]}])
-        )
-        orig_total_idx = sum(
-            s.get("idx_counts", [0])[0] if isinstance(s, dict) else len(s.faces) * 3
-            for s in (orig_mesh.submeshes if orig_mesh.submeshes else [{"idx_counts": [0]}])
-        )
-
-        if orig_total_verts > 0:
-            stride = (orig_lod0_size - orig_total_idx * 2) // orig_total_verts
-        else:
-            stride = 40  # default
-
-        stride = max(36, min(64, stride))  # clamp to reasonable range
-
-        for vi in range(len(sm.vertices)):
-            vx, vy, vz = sm.vertices[vi]
-            xu = _quantize_u16(vx, bmin[0], bmax[0])
-            yu = _quantize_u16(vy, bmin[1], bmax[1])
-            zu = _quantize_u16(vz, bmin[2], bmax[2])
-
-            rec = bytearray(stride)
-            # Position: bytes 0-5
-            struct.pack_into("<HHH", rec, 0, xu, yu, zu)
-            # UV: bytes 8-11 as float16
-            if vi < len(sm.uvs):
-                u, v = sm.uvs[vi]
-                try:
-                    struct.pack_into("<e", rec, 8, u)
-                    struct.pack_into("<e", rec, 10, v)
-                except (OverflowError, ValueError):
-                    pass
-            # Constant at bytes 12-15
-            struct.pack_into("<I", rec, 12, 0x3C000000)
-            # Bone: bytes 28-31 = 0xFF000000 (no bone / default)
-            if stride >= 32:
-                struct.pack_into("<I", rec, 28, 0x000000FF)
-            # Terminator at last 4 bytes
-            struct.pack_into("<I", rec, stride - 4, 0xFFFFFFFF)
-
-            lod0_verts_buf.extend(rec)
-
-        # Index buffer: triangle list
-        for a, b, c in sm.faces:
-            lod0_idx_buf.extend(struct.pack("<HHH", a, b, c))
-
-    # For lower LODs, copy LOD0 data (simplified)
-    lod_data = [bytes(lod0_verts_buf) + bytes(lod0_idx_buf)] * n_lods
-
-    # ── Rebuild section 0 ──
-    # Update submesh descriptors in section 0 with new bbox and counts
-    new_s0 = _rebuild_pac_section0(
-        orig_s0, original_data, n_lods, mesh.submeshes, stride,
-        flags, orig_lod_offsets, orig_split_offsets
-    )
-
-    # ── Assemble final PAC ──
-    # Header (80 bytes) + section 0 + LOD sections (lowest to highest)
-    # LOD sections are stored in ascending quality order: LOD(n-1), ..., LOD1, LOD0
-
-    # Compute new section positions
-    s0_size = len(new_s0)
-    lod_sizes = [len(d) for d in lod_data]
-
-    # Sections are ordered: sec0, LOD_lowest, ..., LOD_highest
-    # LOD offsets (stored LOD0-first in section 0) are absolute file positions
-    sec_positions = [header_size]  # sec0 start
-    pos = header_size + s0_size
-    for sz in reversed(lod_sizes):  # lowest LOD first in file
-        sec_positions.append(pos)
-        pos += sz
-
-    # LOD offsets in descending order (LOD0 first)
-    new_lod_offsets = list(reversed(sec_positions[1:]))
-
-    # Split offsets: vertex data ends, index data begins
-    new_split_offsets = []
-    for i, sm_list_data in enumerate(lod_data):
-        total_v = sum(len(s.vertices) for s in mesh.submeshes)
-        split = sec_positions[n_lods - i] + total_v * stride  # absolute
-        new_split_offsets.append(split)
-
-    # Update offsets in section 0
-    off = 5  # after flags(4) + n_lods(1)
-    for i in range(n_lods):
-        struct.pack_into("<I", new_s0, off + i * 4, new_lod_offsets[i])
-    off += n_lods * 4
-    for i in range(n_lods):
-        struct.pack_into("<I", new_s0, off + i * 4, new_split_offsets[i])
-
-    # Build header
-    header = bytearray(original_data[:header_size])
-
-    # Update section sizes in header (try u64 format first)
-    all_sec_sizes = [s0_size] + list(reversed(lod_sizes))
-    # Write as u64 at 0x14 (fits in 5 slots for up to 5 sections)
-    for i, sz in enumerate(all_sec_sizes):
-        if 0x14 + i * 8 + 8 <= header_size:
-            struct.pack_into("<Q", header, 0x14 + i * 8, sz)
-
-    # Assemble
-    result = bytearray(header)
-    result.extend(new_s0)
-    for d in reversed(lod_data):  # lowest LOD first in file
-        result.extend(d)
-
-    logger.info("Built PAC %s: %d bytes (%d submeshes, %d verts, %d faces)",
-                mesh.path, len(result), len(mesh.submeshes),
-                mesh.total_vertices, mesh.total_faces)
-    return bytes(result)
-
-
-def _rebuild_pac_section0(orig_s0: bytearray, original_data: bytes,
-                          n_lods: int, submeshes: list[SubMesh],
-                          stride: int, flags: int,
-                          orig_lod_offsets: list, orig_split_offsets: list) -> bytearray:
-    """Rebuild section 0 with updated submesh bbox and counts.
-
-    Preserves all original data (names, materials, bones, Havok data),
-    only updates the bounding box floats and vertex/index counts.
-    """
-    s0 = bytearray(orig_s0)
-
-    # Find submesh descriptors by scanning for strings (same as parser)
-    off = 5 + n_lods * 4 * 2  # after flags + offset tables
-
-    # Scan for first string
-    scan = off
-    while scan < len(s0) - 10:
-        b = s0[scan]
-        if 4 < b < 100:
-            test = s0[scan + 1:scan + 1 + b]
-            if len(test) == b and all(32 <= c < 127 for c in test):
-                break
-        scan += 1
-    off = scan
-
-    sm_idx = 0
-    while off < len(s0) - 20 and sm_idx < len(submeshes):
-        name_len = s0[off]
-        if name_len == 0 or name_len > 200:
-            break
-        off += 1 + name_len  # skip name
-
-        mat_len = s0[off]
-        off += 1 + mat_len  # skip material
-
-        # flag + pad
-        off += 3
-
-        # Update 8 bbox floats: [pivot_x, pivot_y, bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z]
-        sm = submeshes[sm_idx]
-        bmin, bmax = _compute_bbox(sm.vertices)
-
-        # Preserve original pivot (floats[0:2])
-        # Update bbox (floats[2:8])
-        struct.pack_into("<f", s0, off + 2 * 4, bmin[0])
-        struct.pack_into("<f", s0, off + 3 * 4, bmin[1])
-        struct.pack_into("<f", s0, off + 4 * 4, bmin[2])
-        struct.pack_into("<f", s0, off + 5 * 4, bmax[0])
-        struct.pack_into("<f", s0, off + 6 * 4, bmax[1])
-        struct.pack_into("<f", s0, off + 7 * 4, bmax[2])
-        off += 32
-
-        # Skip bone data
-        bone_count = s0[off]
-        off += 1
-        bones_size = bone_count + (bone_count % 2)
-        off += bones_size
-
-        # Update vertex counts (n_lods × u16) — set all LODs to LOD0 value
-        nv = len(sm.vertices)
-        for i in range(n_lods):
-            struct.pack_into("<H", s0, off + i * 2, nv)
-        off += n_lods * 2
-
-        # Update index counts (read until garbage, then update valid ones)
-        ni = len(sm.faces) * 3
-        for i in range(n_lods):
-            if off + 4 > len(s0):
-                break
-            val = struct.unpack_from("<I", s0, off)[0]
-            if val > 10_000_000:
-                break
-            struct.pack_into("<I", s0, off, ni)
-            off += 4
-
-        sm_idx += 1
-
-        # Check next submesh
-        if off >= len(s0) - 4:
-            break
-        next_b = s0[off]
-        if next_b == 0 or next_b > 200:
-            break
-        peek = s0[off + 1:off + 1 + min(next_b, 6)]
-        if not all(32 <= c < 127 for c in peek):
-            break
-
-    return s0
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  PAM BUILDER
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -2253,33 +1991,144 @@ def _pack_pac_normal(normal: tuple[float, float, float], existing_packed: int = 
 
 
 def _choose_pac_donor_indices(orig_sm: SubMesh, new_sm: SubMesh) -> list[int]:
-    """Choose the closest original PAC vertex record to clone for each new vertex."""
-    if not orig_sm.vertices:
-        return [0] * len(new_sm.vertices)
+    """Choose the closest original PAC vertex record to clone for each new vertex.
 
-    exact_map: dict[tuple[int, int, int], list[int]] = {}
+    PAC vertex records carry bone indices, bone weights, packed normals and a
+    handful of engine-internal bytes that the OBJ round-trip cannot preserve.
+    For every new vertex we need a *donor* — the original vertex whose record
+    we clone before overwriting position/UV/normal. Exact position matches win
+    when available (the common "user only moved a few verts" case); otherwise
+    we fall back to the spatially nearest donor.
+
+    Algorithm:
+      1. Exact lookup via a dict keyed on positions rounded to 1e-5.
+      2. For misses, a uniform spatial hash returns O(1) candidates on average
+         and guarantees correctness by expanding the search shell until a
+         donor is found. This replaces the previous O(n²) linear scan, which
+         was tolerable for 500-vert weapons but catastrophic on 20k-vert
+         character bodies.
+    """
+    n_orig = len(orig_sm.vertices)
+    n_new = len(new_sm.vertices)
+    if n_orig == 0:
+        return [0] * n_new
+
+    exact_map: dict[tuple[int, int, int], int] = {}
     for orig_idx, pos in enumerate(orig_sm.vertices):
         key = (round(pos[0] * 100000), round(pos[1] * 100000), round(pos[2] * 100000))
-        exact_map.setdefault(key, []).append(orig_idx)
+        # First writer wins — matches previous exact_map[...].append + [0] behaviour.
+        exact_map.setdefault(key, orig_idx)
 
-    donor_indices: list[int] = []
+    # Short-circuit the linear scan for very small meshes where the spatial
+    # index overhead isn't worth it.
+    if n_orig <= 64:
+        donor_indices: list[int] = []
+        for new_pos in new_sm.vertices:
+            key = (round(new_pos[0] * 100000), round(new_pos[1] * 100000), round(new_pos[2] * 100000))
+            exact = exact_map.get(key)
+            if exact is not None:
+                donor_indices.append(exact)
+                continue
+            best_idx = 0
+            best_dist = float("inf")
+            for orig_idx in range(n_orig):
+                ox, oy, oz = orig_sm.vertices[orig_idx]
+                dx = new_pos[0] - ox
+                dy = new_pos[1] - oy
+                dz = new_pos[2] - oz
+                dist_sq = dx * dx + dy * dy + dz * dz
+                if dist_sq < best_dist:
+                    best_dist = dist_sq
+                    best_idx = orig_idx
+            donor_indices.append(best_idx)
+        return donor_indices
+
+    # Build a uniform spatial hash. Cell size is set so the mean occupancy is
+    # around the cube-root of the vertex count, which balances lookup cost
+    # (cells per shell) against candidate cost (verts per cell).
+    xs = [v[0] for v in orig_sm.vertices]
+    ys = [v[1] for v in orig_sm.vertices]
+    zs = [v[2] for v in orig_sm.vertices]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+
+    extent = max(max_x - min_x, max_y - min_y, max_z - min_z, 1e-6)
+    # Target ~8 verts per cell at equilibrium.
+    target_cells_per_axis = max(2, int(round((n_orig / 8.0) ** (1.0 / 3.0))))
+    cell_size = extent / target_cells_per_axis
+    if cell_size < 1e-6:
+        cell_size = 1e-6
+    inv_cell = 1.0 / cell_size
+
+    def _cell_key(x: float, y: float, z: float) -> tuple[int, int, int]:
+        return (
+            int((x - min_x) * inv_cell),
+            int((y - min_y) * inv_cell),
+            int((z - min_z) * inv_cell),
+        )
+
+    grid: dict[tuple[int, int, int], list[int]] = {}
+    for orig_idx in range(n_orig):
+        ox, oy, oz = orig_sm.vertices[orig_idx]
+        grid.setdefault(_cell_key(ox, oy, oz), []).append(orig_idx)
+
+    donor_indices = []
+    max_shell = target_cells_per_axis + 1  # guarantees coverage of the whole mesh
+
     for new_pos in new_sm.vertices:
         key = (round(new_pos[0] * 100000), round(new_pos[1] * 100000), round(new_pos[2] * 100000))
-        exact_hits = exact_map.get(key)
-        if exact_hits:
-            donor_indices.append(exact_hits[0])
+        exact = exact_map.get(key)
+        if exact is not None:
+            donor_indices.append(exact)
             continue
 
+        cx, cy, cz = _cell_key(new_pos[0], new_pos[1], new_pos[2])
         best_idx = 0
         best_dist = float("inf")
-        for orig_idx, orig_pos in enumerate(orig_sm.vertices):
-            dx = new_pos[0] - orig_pos[0]
-            dy = new_pos[1] - orig_pos[1]
-            dz = new_pos[2] - orig_pos[2]
-            dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq < best_dist:
-                best_dist = dist_sq
-                best_idx = orig_idx
+
+        shell = 0
+        while shell <= max_shell:
+            # Scan all cells in the current shell (surface of a cube of radius `shell`
+            # centred on the query cell). Shell 0 is just the query cell itself.
+            lo, hi = cx - shell, cx + shell
+            for ix in range(lo, hi + 1):
+                for iy in range(cy - shell, cy + shell + 1):
+                    for iz in range(cz - shell, cz + shell + 1):
+                        # Only evaluate the cube's surface on shells > 0 to avoid
+                        # re-scanning interior cells from earlier shells.
+                        if shell > 0 and (
+                            lo < ix < hi
+                            and cy - shell < iy < cy + shell
+                            and cz - shell < iz < cz + shell
+                        ):
+                            continue
+                        bucket = grid.get((ix, iy, iz))
+                        if not bucket:
+                            continue
+                        for orig_idx in bucket:
+                            ox, oy, oz = orig_sm.vertices[orig_idx]
+                            dx = new_pos[0] - ox
+                            dy = new_pos[1] - oy
+                            dz = new_pos[2] - oz
+                            dist_sq = dx * dx + dy * dy + dz * dz
+                            if dist_sq < best_dist:
+                                best_dist = dist_sq
+                                best_idx = orig_idx
+
+            # Termination test. We just completed shell `s`. The nearest point in
+            # any cell at chebyshev distance `s+1` sits at euclidean distance
+            # at least `s * cell_size` from the query (geometry of unit cubes).
+            # So we can stop once best_dist < (s * cell_size)^2.
+            #
+            # Note: for s == 0 this condition is `best_dist < 0`, which never
+            # holds — we always advance to shell 1 even when shell 0 had a hit,
+            # because a chebyshev-1 cell can still contain an arbitrarily close
+            # point when the query sits near its own cell's boundary.
+            if best_dist < float("inf") and (shell * cell_size) ** 2 > best_dist:
+                break
+            shell += 1
+
         donor_indices.append(best_idx)
 
     return donor_indices

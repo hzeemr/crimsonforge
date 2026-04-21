@@ -1,0 +1,91 @@
+// CrimsonForge Quest Dialog Tracer Script for x64dbg
+//
+// This script traces the HasQuestDialog gimmick state check
+// to find exactly where the character ownership comparison happens.
+//
+// Usage:
+//   1. Launch Crimson Desert, load save as Damiane
+//   2. Go near a quest NPC with ! marker (switch to Kliff to verify it exists, then switch back to Damiane)
+//   3. Open x64dbg -> File -> Attach -> select CrimsonDesert.exe
+//   4. Go to Script tab -> Load script -> select this file
+//   5. Run the script
+//   6. Switch back to the game
+//   7. Walk near the quest NPC
+//   8. Switch back to x64dbg to see the log
+
+// Set logging
+log "=== CrimsonForge Quest Dialog Trace ==="
+log "Looking for HasQuestDialog evaluation..."
+
+// The gimmick state machine state names are in the exe
+// "HasQuestDialog" string is at RVA 0x4AB6AD8 (approx)
+// Find the actual string address
+findall CrimsonDesert.exe, "HasQuestDialog"
+log "HasQuestDialog string references found"
+
+// Set breakpoints on the ConditionData_HasQuestDialog Evaluate methods
+// vfunc[2] at RVA 0x1BAB120
+bp CrimsonDesert.exe+1BAB120
+bpcnd CrimsonDesert.exe+1BAB120, "1"
+bplog CrimsonDesert.exe+1BAB120, "ConditionData_HasQuestDialog.Evaluate: RCX={RCX} RDX={RDX} R8={R8}"
+
+// vfunc[12] at RVA 0x1BA57A0
+bp CrimsonDesert.exe+1BA57A0
+bpcnd CrimsonDesert.exe+1BA57A0, "1"
+bplog CrimsonDesert.exe+1BA57A0, "ConditionData_HasQuestDialog.vfunc12: RCX={RCX} RDX={RDX}"
+
+// AICondition_HasQuestDialog methods
+// vfunc[5] at RVA 0x1C29760
+bp CrimsonDesert.exe+1C29760
+bpcnd CrimsonDesert.exe+1C29760, "1"
+bplog CrimsonDesert.exe+1C29760, "AICondition_HasQuestDialog.Evaluate: RCX={RCX} RDX={RDX} R8={R8}"
+
+// vfunc[6] at RVA 0x4FB1760
+bp CrimsonDesert.exe+4FB1760
+bpcnd CrimsonDesert.exe+4FB1760, "1"
+bplog CrimsonDesert.exe+4FB1760, "AICondition_HasQuestDialog.vfunc6: RCX={RCX}"
+
+// vfunc[8] at RVA 0x1C334F0
+bp CrimsonDesert.exe+1C334F0
+bpcnd CrimsonDesert.exe+1C334F0, "1"
+bplog CrimsonDesert.exe+1C334F0, "AICondition_HasQuestDialog.vfunc8: RCX={RCX} RDX={RDX}"
+
+// ClientQuestDialogInteractionProcessor methods
+bp CrimsonDesert.exe+7981E0
+bpcnd CrimsonDesert.exe+7981E0, "1"
+bplog CrimsonDesert.exe+7981E0, "ClientQuestDialogInteraction.CanProcess: RCX={RCX} RDX={RDX} R8={R8}"
+
+bp CrimsonDesert.exe+7987C0
+bpcnd CrimsonDesert.exe+7987C0, "1"
+bplog CrimsonDesert.exe+7987C0, "ClientQuestDialogInteraction.Process: RCX={RCX} RDX={RDX}"
+
+// FindManualInteractionTargetProcessor methods
+bp CrimsonDesert.exe+7F3740
+bpcnd CrimsonDesert.exe+7F3740, "1"
+bplog CrimsonDesert.exe+7F3740, "FindInteractionTarget.vfunc0: RCX={RCX}"
+
+bp CrimsonDesert.exe+7F3E10
+bpcnd CrimsonDesert.exe+7F3E10, "1"
+bplog CrimsonDesert.exe+7F3E10, "FindInteractionTarget.FindTarget: RCX={RCX} RDX={RDX} R8={R8}"
+
+// CommonQuestDialogActorComponent methods
+bp CrimsonDesert.exe+150C930
+bpcnd CrimsonDesert.exe+150C930, "1"
+bplog CrimsonDesert.exe+150C930, "QuestDialogActorComponent.vfunc0: RCX={RCX}"
+
+bp CrimsonDesert.exe+150CA10
+bpcnd CrimsonDesert.exe+150CA10, "1"
+bplog CrimsonDesert.exe+150CA10, "QuestDialogActorComponent.vfunc4: RCX={RCX} RDX={RDX}"
+
+// ClientSelfQuestDialogActorComponent (player's quest dialog component)
+bp CrimsonDesert.exe+435520
+bpcnd CrimsonDesert.exe+435520, "1"
+bplog CrimsonDesert.exe+435520, "SelfQuestDialogActor.vfunc0: RCX={RCX}"
+
+bp CrimsonDesert.exe+435680
+bpcnd CrimsonDesert.exe+435680, "1"
+bplog CrimsonDesert.exe+435680, "SelfQuestDialogActor.vfunc4: RCX={RCX} RDX={RDX}"
+
+log "All breakpoints set. Resume the game (F9) and approach the quest NPC."
+log "Check the Log tab for hits."
+log "Press F9 to continue game execution."

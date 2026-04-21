@@ -193,6 +193,16 @@ def _fbx_prop(v):
             enc = 1 if len(cmp) < len(raw) else 0
             cl = len(cmp) if enc else len(raw)
             return b"d" + struct.pack("<III", len(v), enc, cl) + (cmp if enc else raw)
+        # Integer array. Promote to int64 ('l') when any value
+        # overflows int32 — the FBX KTime ticks used by animation
+        # curves routinely run into the 10-digit range.
+        needs_i64 = any((x > 2147483647 or x < -2147483648) for x in v)
+        if needs_i64:
+            raw = struct.pack(f"<{len(v)}q", *v)
+            cmp = zlib.compress(raw)
+            enc = 1 if len(cmp) < len(raw) else 0
+            cl = len(cmp) if enc else len(raw)
+            return b"l" + struct.pack("<III", len(v), enc, cl) + (cmp if enc else raw)
         raw = struct.pack(f"<{len(v)}i", *v)
         cmp = zlib.compress(raw)
         enc = 1 if len(cmp) < len(raw) else 0
@@ -488,7 +498,35 @@ def export_fbx_with_skeleton(mesh: ParsedMesh, skeleton, output_dir: str,
             bone_attr_ids[bone.index] = uid()
 
     root_id = uid()
-    skin_id = uid() if skeleton and skeleton.bones else None
+
+    # Precompute skinning data per submesh.
+    # For each submesh, we collect the set of (bone_index, [(vertex_idx, weight), ...])
+    # entries. Only bones that actually influence at least one vertex in the
+    # submesh get a Cluster — FBX importers tolerate unused bones but empty
+    # clusters confuse some importers.
+    skin_ids: list[_FbxId | None] = []          # one per submesh; None if no bones used
+    cluster_ids: list[dict[int, _FbxId]] = []    # per submesh: {bone_index: cluster_id}
+    cluster_data: list[dict[int, list[tuple[int, float]]]] = []  # per submesh: {bone_index: [(vi, w)]}
+
+    for sm in mesh.submeshes:
+        per_bone: dict[int, list[tuple[int, float]]] = {}
+        if skeleton and skeleton.bones:
+            # SubMesh.bone_indices / bone_weights are per-vertex tuples.
+            # Missing entries just mean "no skinning on this vertex".
+            for vi, (bones, weights) in enumerate(zip(sm.bone_indices, sm.bone_weights)):
+                for b_idx, w in zip(bones, weights):
+                    if w <= 0.0:
+                        continue
+                    # Only accept bones the skeleton actually declares.
+                    if 0 <= b_idx < len(skeleton.bones):
+                        per_bone.setdefault(int(b_idx), []).append((vi, float(w)))
+        if per_bone:
+            skin_ids.append(uid())
+            cluster_ids.append({b_idx: uid() for b_idx in per_bone})
+        else:
+            skin_ids.append(None)
+            cluster_ids.append({})
+        cluster_data.append(per_bone)
 
     # Objects
     def objects(b):
@@ -569,6 +607,74 @@ def export_fbx_with_skeleton(mesh: ParsedMesh, skeleton, output_dir: str,
                     f"{bone.name}\x00\x01Model", "LimbNode"],
                     children=[bone_model])
 
+        # Skin + Cluster deformers — the part that actually ties the
+        # vertex weights to the bones on import. Without these, Blender
+        # / Maya see the LimbNode armature but the mesh has no skin
+        # modifier attached and users report "no export for skin /
+        # armature modifiers" (Yoo on community discord).
+        identity_matrix = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+
+        def _bone_bind_matrices(bone) -> tuple[list[float], list[float]]:
+            """Return (Transform, TransformLink) for an FBX Cluster.
+
+            FBX Cluster semantics:
+              TransformLink = bone's world-space bind pose (4x4, column-major)
+              Transform     = inverse of TransformLink in geometry space
+
+            The skeleton parser exposes these as ``bone.bind_matrix`` and
+            ``bone.inv_bind_matrix``; when they're populated we use them
+            verbatim. Missing data falls back to identity which Blender
+            treats as "rest pose at origin" — the mesh imports with
+            weights intact, just without a custom bind pose.
+            """
+            if getattr(bone, "inv_bind_matrix", None) and len(bone.inv_bind_matrix) == 16:
+                transform = [float(v) for v in bone.inv_bind_matrix]
+            else:
+                transform = list(identity_matrix)
+            if getattr(bone, "bind_matrix", None) and len(bone.bind_matrix) == 16:
+                link = [float(v) for v in bone.bind_matrix]
+            else:
+                link = list(identity_matrix)
+            return transform, link
+
+        for idx, sm in enumerate(mesh.submeshes):
+            sk_id = skin_ids[idx]
+            if sk_id is None:
+                continue
+
+            def skin_node(b2, sid=sk_id):
+                W(b2, "Version", [101])
+                # SkinningType: Linear is the safe, compatible default.
+                W(b2, "SkinningType", ["Linear"])
+
+            W(b, "Deformer", [sk_id, f"{sm.name}_Skin\x00\x01Deformer", "Skin"],
+              children=[skin_node])
+
+            for b_idx, weight_list in cluster_data[idx].items():
+                cl_id = cluster_ids[idx][b_idx]
+                bone = skeleton.bones[b_idx]
+                indexes = [vi for vi, _ in weight_list]
+                weights = [w for _, w in weight_list]
+                transform, link = _bone_bind_matrices(bone)
+
+                def cluster_node(b2, _idx=indexes, _w=weights,
+                                 _t=transform, _l=link, _bn=bone):
+                    W(b2, "Version", [100])
+                    W(b2, "UserData", ["", ""])
+                    W(b2, "Indexes", [_idx])
+                    W(b2, "Weights", [_w])
+                    W(b2, "Transform", [_t])
+                    W(b2, "TransformLink", [_l])
+
+                W(b, "Deformer",
+                  [cl_id, f"{bone.name}_{sm.name}\x00\x01SubDeformer", "Cluster"],
+                  children=[cluster_node])
+
     W(buf, "Objects", children=[objects])
 
     # Connections
@@ -589,6 +695,30 @@ def export_fbx_with_skeleton(mesh: ParsedMesh, skeleton, output_dir: str,
                                bone_model_ids[bone.parent_index]])
                 else:
                     W(b, "C", ["OO", bone_model_ids[bone.index], _FbxId(0)])
+
+        # Skin + Cluster connections. Connection topology per submesh:
+        #
+        #   Geometry  <---OO---  Skin
+        #              Skin     <---OO---  Cluster_bone_0
+        #                                            ^
+        #                      Bone_model_for_bone_0  +---OO (bind)
+        #              Skin     <---OO---  Cluster_bone_1
+        #                                            ^
+        #                      Bone_model_for_bone_1  +---OO
+        #              ...
+        for idx in range(len(mesh.submeshes)):
+            sk_id = skin_ids[idx]
+            if sk_id is None:
+                continue
+            # Skin -> Geometry
+            W(b, "C", ["OO", sk_id, mesh_ids[idx]])
+            for b_idx, cl_id in cluster_ids[idx].items():
+                # Cluster -> Skin
+                W(b, "C", ["OO", cl_id, sk_id])
+                # Bone Model -> Cluster (this is the link that makes
+                # the Cluster "belong" to a bone so FBX importers can
+                # rebuild the armature modifier).
+                W(b, "C", ["OO", bone_model_ids[b_idx], cl_id])
 
     W(buf, "Connections", children=[connections])
 

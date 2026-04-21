@@ -322,6 +322,10 @@ class ExplorerTab(QWidget):
         self._active_scope_title = ""
         self._pending_scope_request: tuple[list[str], str, str] | None = None
         self._workbench_dialog: ExplorerWorkbenchDialog | None = None
+        # Lazy-built reverse index: PAC archive path -> prefabs that
+        # reference it. Cached per tab instance so 'Open Matching
+        # Prefab' is instant after first build.
+        self._prefab_ref_index = None
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(250)
@@ -816,6 +820,8 @@ class ExplorerTab(QWidget):
                     export_obj_act.triggered.connect(lambda _=False, e=entry: self._export_mesh(e, "obj"))
                     export_fbx_act = menu.addAction("Export as FBX")
                     export_fbx_act.triggered.connect(lambda _=False, e=entry: self._export_mesh(e, "fbx"))
+                    menu.addAction("Diagnose dye / tint system").triggered.connect(
+                        lambda _=False, e=entry: self._diagnose_dye(e))
                     menu.addSeparator()
                     import_act = menu.addAction("Import OBJ (preview rebuilt mesh)")
                     import_act.triggered.connect(lambda _=False, e=entry: self._import_mesh(e))
@@ -823,6 +829,26 @@ class ExplorerTab(QWidget):
                     patch_act.triggered.connect(lambda _=False, e=entry: self._import_and_patch_mesh(e))
                     ship_act = menu.addAction("Import OBJ + Ship to App")
                     ship_act.triggered.connect(lambda _=False, e=entry: self._ship_single_mesh(e))
+
+        # Animation (PAA) exports — FBX keyframe export for modders.
+        if click_index.isValid():
+            click_row_data = self._model.row_at(click_index.row())
+            if click_row_data and click_row_data.entry.path.lower().endswith(".paa"):
+                menu.addSeparator()
+                entry = click_row_data.entry
+                menu.addAction("Export animation as FBX").triggered.connect(
+                    lambda _=False, e=entry: self._export_paa_fbx(e))
+
+        # Havok (HKX) — JSON dump + risk diagnostic from the Layer 1-5 stack.
+        if click_index.isValid():
+            click_row_data = self._model.row_at(click_index.row())
+            if click_row_data and click_row_data.entry.path.lower().endswith(".hkx"):
+                menu.addSeparator()
+                entry = click_row_data.entry
+                menu.addAction("Dump HKX as JSON").triggered.connect(
+                    lambda _=False, e=entry: self._dump_hkx_json(e))
+                menu.addAction("Physics edit-risk report").triggered.connect(
+                    lambda _=False, e=entry: self._hkx_risk_report(e))
 
         # Audio export/import for audio files
         if click_index.isValid():
@@ -838,7 +864,341 @@ class ExplorerTab(QWidget):
                     imp_wav = menu.addAction("Import WAV + Patch to Game")
                     imp_wav.triggered.connect(lambda _=False, e=entry: self._import_audio_patch(e))
 
+        # Quick Mods submenu — always available when game is loaded
+        if self._vfs:
+            menu.addSeparator()
+            quick_menu = menu.addMenu("Quick Mods")
+            quick_menu.addAction("Mercenary Info (mercenaryinfo)").triggered.connect(
+                lambda: self._open_quick_mod("mercenaryinfo.pabgb"))
+            quick_menu.addAction("Ally Groups (allygroupinfo)").triggered.connect(
+                lambda: self._open_quick_mod("allygroupinfo.pabgb"))
+            quick_menu.addAction("Formations (formationinfo)").triggered.connect(
+                lambda: self._open_quick_mod("formationinfo.pabgb"))
+            quick_menu.addAction("Dye Colors (dyecolorgroupinfo)").triggered.connect(
+                lambda: self._open_quick_mod("dyecolorgroupinfo.pabgb"))
+            quick_menu.addAction("Crafting Tools (crafttoolinfo)").triggered.connect(
+                lambda: self._open_quick_mod("crafttoolinfo.pabgb"))
+            quick_menu.addAction("Characters (characterinfo)").triggered.connect(
+                lambda: self._open_quick_mod("characterinfo.pabgb"))
+            quick_menu.addAction("Items (iteminfo)").triggered.connect(
+                lambda: self._open_quick_mod("iteminfo.pabgb"))
+            quick_menu.addAction("NPCs (npcinfo)").triggered.connect(
+                lambda: self._open_quick_mod("npcinfo.pabgb"))
+            quick_menu.addAction("Skills (skill)").triggered.connect(
+                lambda: self._open_quick_mod("skill.pabgb"))
+            quick_menu.addAction("Status Effects (statusinfo)").triggered.connect(
+                lambda: self._open_quick_mod("statusinfo.pabgb"))
+            quick_menu.addSeparator()
+            quick_menu.addAction("State-Machine Browser…").triggered.connect(
+                self._open_state_machine_browser)
+            quick_menu.addAction("Face-Part Browser…").triggered.connect(
+                self._open_face_parts_browser)
+
+        # Game data table editor for .pabgb files
+        if click_index.isValid():
+            click_row_data = self._model.row_at(click_index.row())
+            if click_row_data:
+                file_ext = os.path.splitext(click_row_data.entry.path.lower())[1]
+                if file_ext == ".pabgb":
+                    menu.addSeparator()
+                    entry = click_row_data.entry
+                    edit_act = menu.addAction("Edit Game Data Table")
+                    edit_act.triggered.connect(lambda _=False, e=entry: self._edit_pabgb(e, patch=False))
+                    patch_act = menu.addAction("Edit Table + Patch to Game")
+                    patch_act.triggered.connect(lambda _=False, e=entry: self._edit_pabgb(e, patch=True))
+                elif file_ext == ".prefab":
+                    menu.addSeparator()
+                    entry = click_row_data.entry
+                    edit_act = menu.addAction("Edit Prefab")
+                    edit_act.triggered.connect(lambda _=False, e=entry: self._edit_prefab(e))
+
         menu.exec(self._view.viewport().mapToGlobal(pos))
+
+    def _edit_pabgb(self, entry: PamtFileEntry, patch: bool = False, search: str = ""):
+        """Open the game-data table editor dialog."""
+        try:
+            from ui.dialogs.pabgb_editor_dialog import PabgbEditorDialog
+            from core.pabgb_parser import parse_pabgb
+
+            self._progress.set_status(f"Parsing {os.path.basename(entry.path)}...")
+            QApplication.processEvents()
+
+            data = self._vfs.read_entry_data(entry)
+
+            # Try to find the matching .pabgh header
+            header_data = None
+            header_path = entry.path[:-1] + "h"
+            pamt = self._vfs.load_pamt(
+                os.path.basename(os.path.dirname(entry.paz_file))
+            )
+            for he in pamt.file_entries:
+                if he.path.lower() == header_path.lower():
+                    header_data = self._vfs.read_entry_data(he)
+                    break
+
+            table = parse_pabgb(data, header_data, os.path.basename(entry.path))
+
+            dlg = PabgbEditorDialog(
+                table, entry, self._vfs,
+                patch_mode=patch, initial_search=search, parent=self,
+            )
+            self._progress.set_status(f"Opened editor: {os.path.basename(entry.path)}")
+            dlg.exec()
+        except Exception as e:
+            show_error(self, "Table Editor Error", str(e))
+
+    def _open_face_parts_browser(self):
+        """Build the face-part catalog from the VFS and open the
+        Face-Part Browser dialog.
+
+        Face customisation in Crimson Desert is submesh-swapping: each
+        facial region is a discrete PAC variant (cd_ptm_00_head_0001,
+        cd_ppdm_00_eyeleft_00_0001, ...). Rather than trying to sculpt
+        non-existent blendshapes, we surface the catalog of available
+        variants so modders can pick which one to load.
+        """
+        try:
+            from core.face_parts import build_catalog, classify_face_part
+            from ui.dialogs.face_parts_dialog import FacePartsDialog
+
+            self._progress.set_status("Scanning archives for face parts…")
+            QApplication.processEvents()
+
+            # Walk EVERY available package group via the public
+            # list_package_groups() + load_pamt() API. Character
+            # appearance can live in any group (Kliff + NPCs are in
+            # 0000 / 0009 typically, but accessories scatter).
+            archive_paths: dict[str, str] = {}
+            filenames: list[str] = []
+
+            try:
+                groups = self._vfs.list_package_groups()
+            except Exception as ex:
+                show_error(self, "Face-Part Browser",
+                           f"Game not loaded — cannot scan archives.\n\n{ex}")
+                return
+
+            for grp in groups:
+                try:
+                    pamt = self._vfs.load_pamt(grp)
+                except Exception:
+                    continue
+                for entry in pamt.file_entries:
+                    path = entry.path.lower()
+                    if not path.endswith(".pac"):
+                        continue
+                    base = os.path.basename(path)
+                    if classify_face_part(base) is None:
+                        continue
+                    # First occurrence wins for duplicate basenames
+                    if base not in archive_paths:
+                        archive_paths[base] = entry.path
+                        filenames.append(base)
+
+            catalog = build_catalog(filenames, archive_paths=archive_paths)
+            if catalog.count() == 0:
+                show_error(
+                    self, "Face-Part Browser",
+                    "No face-part PACs found in any loaded archive.\n\n"
+                    "Make sure the game is loaded and the character "
+                    "package groups have been scanned.",
+                )
+                return
+            self._progress.set_status(
+                f"Face parts: {catalog.count():,} across "
+                f"{len(catalog.categories())} categories"
+            )
+            dlg = FacePartsDialog(catalog, vfs=self._vfs, parent=self)
+            # If the user clicks 'Open Matching Prefab', resolve via
+            # the reverse-reference index rather than basename guess.
+            dlg.prefab_edit_requested.connect(
+                self._open_prefab_via_pac
+            )
+            dlg.exec()
+        except Exception as e:
+            logger.exception("face-part browser failed")
+            show_error(self, "Face-Part Browser Error", str(e))
+
+    def _open_prefab_via_pac(self, pac_archive_path: str):
+        """Open the prefab(s) that REFERENCE ``pac_archive_path``.
+
+        Prefabs carry internal .pac path references that don't
+        necessarily match their own basename — e.g.
+        ``cd_phm_00_cloak_00_0208_t.prefab`` references
+        ``cd_phm_00_cloak_00_0054_01.pac``. A reverse index over
+        every prefab in the VFS gives the authoritative mapping.
+
+        Index is built lazily on first call and cached on the tab so
+        subsequent 'Open Matching Prefab' clicks are instant.
+        """
+        try:
+            from core.prefab_reference_index import (
+                build_reference_index_from_vfs,
+            )
+            if self._prefab_ref_index is None:
+                self._progress.set_status(
+                    "Building prefab-reference index (one-time scan)…"
+                )
+                QApplication.processEvents()
+                self._prefab_ref_index = build_reference_index_from_vfs(self._vfs)
+            idx = self._prefab_ref_index
+
+            hits = idx.prefabs_referencing(pac_archive_path)
+            if not hits:
+                # Fallback: try basename-only
+                hits = idx.prefabs_referencing(
+                    os.path.basename(pac_archive_path)
+                )
+            if not hits:
+                show_error(
+                    self, "No prefab found",
+                    f"No prefab in the loaded archives references "
+                    f"{pac_archive_path}.\n\n"
+                    f"(The reverse-reference index covers "
+                    f"{idx.prefab_count():,} prefabs and "
+                    f"{idx.pac_count():,} unique PAC paths.)",
+                )
+                return
+
+            # If multiple prefabs reference the same PAC, let the
+            # user pick. Usually there's only one.
+            if len(hits) > 1:
+                from PySide6.QtWidgets import QInputDialog
+                choice, ok = QInputDialog.getItem(
+                    self, "Multiple matches",
+                    f"{len(hits)} prefabs reference this PAC. Pick one to open:",
+                    hits, 0, False,
+                )
+                if not ok:
+                    return
+                target = choice
+            else:
+                target = hits[0]
+
+            # Find the PAMT entry for `target`
+            needle = target.lower()
+            for grp in self._vfs.list_package_groups():
+                try:
+                    pamt = self._vfs.load_pamt(grp)
+                except Exception:
+                    continue
+                for entry in pamt.file_entries:
+                    if entry.path.lower() == needle:
+                        self._edit_prefab(entry)
+                        return
+            show_error(
+                self, "Prefab not found",
+                f"Reverse index pointed at {target!r} but no PAMT "
+                f"entry was found for it.",
+            )
+        except Exception as e:
+            logger.exception("open prefab by pac ref failed")
+            show_error(self, "Prefab Error", str(e))
+
+    def _open_state_machine_browser(self):
+        """Build the cross-.pabgb state-machine index and open the browser."""
+        try:
+            from core.state_machine import build_state_index
+            from core.pabgb_parser import parse_pabgb
+            from ui.dialogs.state_machine_dialog import StateMachineDialog
+
+            # State machine data lives primarily in package group 0008
+            # (game data tables). We parse the tables that carry
+            # condition expressions; low-priority tables are skipped
+            # so the initial scan stays under a few seconds.
+            STATE_TABLES = (
+                "gamedata/conditioninfo.pabgb",
+                "gamedata/stageinfo.pabgb",
+                "gamedata/gimmickinfo.pabgb",
+                "gamedata/gimmickgroupinfo.pabgb",
+                "gamedata/characterinfo.pabgb",
+                "gamedata/actionpointinfo.pabgb",
+                "gamedata/actionrestrictionorderinfo.pabgb",
+                "gamedata/skillgroupinfo.pabgb",
+                "gamedata/aidialogstringinfo.pabgb",
+            )
+            self._progress.set_status("Loading state-machine tables…")
+            QApplication.processEvents()
+
+            try:
+                pamt = self._vfs.load_pamt("0008")
+            except Exception:
+                show_error(self, "State Machine",
+                           "Package group 0008 not available — is the "
+                           "game loaded?")
+                return
+
+            entries_by_path = {e.path.lower(): e for e in pamt.file_entries}
+            tables = []
+            for target in STATE_TABLES:
+                entry = entries_by_path.get(target)
+                if entry is None:
+                    continue
+                data = self._vfs.read_entry_data(entry)
+                header_path = target[:-1] + "h"
+                header_entry = entries_by_path.get(header_path)
+                header_data = (
+                    self._vfs.read_entry_data(header_entry)
+                    if header_entry else None
+                )
+                try:
+                    tbl = parse_pabgb(data, header_data, os.path.basename(target))
+                    tables.append(tbl)
+                except Exception as ex:
+                    logger.warning("state-machine: skipped %s: %s", target, ex)
+
+            if not tables:
+                show_error(self, "State Machine",
+                           "No state-machine tables could be loaded. "
+                           "Check that package group 0008 has been extracted.")
+                return
+
+            self._progress.set_status(
+                f"Indexing {sum(len(t.rows) for t in tables):,} rows…"
+            )
+            QApplication.processEvents()
+            index = build_state_index(tables)
+
+            self._progress.set_status(
+                f"State machine: {len(index.tokens):,} tokens across "
+                f"{len(index.table_rows)} tables"
+            )
+            dlg = StateMachineDialog(index, vfs=self._vfs, parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.exception("state-machine browser failed")
+            show_error(self, "State Machine Error", str(e))
+
+    def _edit_prefab(self, entry: PamtFileEntry):
+        """Open the .prefab editor dialog (strings, file refs, tag values)."""
+        try:
+            from ui.dialogs.prefab_editor_dialog import PrefabEditorDialog
+            from core.prefab_parser import parse_prefab
+
+            self._progress.set_status(f"Parsing {os.path.basename(entry.path)}...")
+            QApplication.processEvents()
+
+            data = self._vfs.read_entry_data(entry)
+            prefab = parse_prefab(data, entry.path)
+
+            dlg = PrefabEditorDialog(prefab, entry, self._vfs, parent=self)
+            self._progress.set_status(f"Opened prefab editor: {os.path.basename(entry.path)}")
+            dlg.exec()
+        except Exception as e:
+            show_error(self, "Prefab Editor Error", str(e))
+
+    def _open_quick_mod(self, table_name: str, patch: bool = True, search: str = ""):
+        """Open a specific game data table by name from package 0008."""
+        try:
+            pamt = self._vfs.load_pamt("0008")
+            target = f"gamedata/{table_name}"
+            for entry in pamt.file_entries:
+                if entry.path.lower() == target.lower():
+                    self._edit_pabgb(entry, patch=patch, search=search)
+                    return
+            show_error(self, "Not Found", f"Table {table_name} not found in game data.")
+        except Exception as e:
+            show_error(self, "Quick Mod Error", str(e))
 
     def _export_audio_wav(self, entry: PamtFileEntry):
         """Export an audio file as WAV."""
@@ -943,7 +1303,32 @@ class ExplorerTab(QWidget):
             temp_path = os.path.join(self._temp_dir, basename)
             with open(temp_path, "wb") as f:
                 f.write(data)
-            self._preview.preview_file(temp_path)
+
+            # For .pabgb files, also extract the paired .pabgh header if it exists
+            if entry.path.lower().endswith(".pabgb") and self._vfs:
+                header_path = entry.path[:-1] + "h"
+                # Derive group from the entry's PAZ file path, not the combo box
+                grp = os.path.basename(os.path.dirname(entry.paz_file))
+                if grp:
+                    try:
+                        pamt = self._vfs.load_pamt(grp)
+                        for he in pamt.file_entries:
+                            if he.path.lower() == header_path.lower():
+                                hdata = self._vfs.read_entry_data(he)
+                                h_temp = os.path.join(self._temp_dir, os.path.basename(header_path))
+                                with open(h_temp, "wb") as hf:
+                                    hf.write(hdata)
+                                break
+                    except Exception:
+                        pass
+
+            # Pass the VFS + original archive path through so the preview can
+            # discover the mesh's paired .dds texture (core.mesh_texture_service).
+            self._preview.preview_file(
+                temp_path,
+                vfs=self._vfs,
+                vfs_path=entry.path.replace("\\", "/"),
+            )
             self._last_preview_path = entry.path
             self._last_preview_time = now
             self._progress.set_status(f"Preview: {basename} ({format_file_size(len(data))})")
@@ -1029,6 +1414,215 @@ class ExplorerTab(QWidget):
             from ui.dialogs.confirmation import show_error
             show_error(self, "Export Error", str(e))
 
+    def _export_paa_fbx(self, entry: PamtFileEntry):
+        """Export a PAA animation to FBX (with the rig pulled from the paired PAB).
+
+        The PAB file that names the bones is resolved by taking the
+        PAA's basename, stripping any trailing animation tag, and
+        walking the same directory for a ``.pab`` of matching name.
+        When no PAB is found, placeholder names (Bone_0, Bone_1, ...)
+        are used so the exported FBX still imports cleanly.
+        """
+        from ui.dialogs.file_picker import pick_directory
+        from ui.dialogs.confirmation import show_error, show_info
+        from core.animation_parser import parse_paa
+        from core.animation_fbx_exporter import export_animation_fbx
+        from core.skeleton_parser import parse_pab, Skeleton
+
+        try:
+            data = self._vfs.read_entry_data(entry)
+            anim = parse_paa(data, os.path.basename(entry.path))
+        except Exception as exc:
+            show_error(self, "PAA parse failed", str(exc))
+            return
+
+        # Attempt to find the paired skeleton. The PAA filename itself
+        # encodes the target rig via a well-known prefix:
+        #   cd_phm_*  → phm_01.pab   (player hero male, 178 bones)
+        #   cd_phw_*  → phw_01.pab   (player hero female)
+        #   cd_ptm_*  → ptm_01.pab   (trol/monster male, 169 bones)
+        #   cd_pgm_*  → pgm_01.pab   (goblin male)
+        #   cd_pgw_*  → pgw_01.pab   (goblin female)
+        #   cd_prh_*  → prh_01.pab   (player ride horse)
+        #   cd_rd_*   → rd_*.pab     (ride/mount variants)
+        #   cd_seq_*_phm1_* / phm* → phm
+        #   cd_seq_*_phw1_* / phw* → phw
+        # Until Apr 2026 the UI used "shortest filename" as the tiebreaker
+        # which picked ptm_01.pab for EVERY animation — that's why all
+        # Blender imports looked identical (wrong skeleton applied to
+        # every track).
+        skeleton: Skeleton | None = None
+        try:
+            grp = os.path.basename(os.path.dirname(entry.paz_file))
+            pamt = self._vfs.load_pamt(grp)
+            paa_name = os.path.basename(entry.path).lower()
+            # Detect the rig prefix from the PAA filename.
+            rig_prefix = None
+            # Order matters — more-specific patterns first.
+            rig_patterns = [
+                ("phm", ("cd_phm_", "_phm_", "_phm1_", "_phm2_", "_phm3_", "_phm8_")),
+                ("phw", ("cd_phw_", "_phw_", "_phw1_", "_phw2_", "_phw3_", "_phw8_")),
+                ("ptm", ("cd_ptm_", "_ptm_", "_ptm1_")),
+                ("ptw", ("cd_ptw_", "_ptw_")),
+                ("pgm", ("cd_pgm_", "_pgm_", "_pgm1_")),
+                ("pgw", ("cd_pgw_", "_pgw_")),
+                ("prh", ("cd_prh_", "_prh_", "cd_rd_prh_")),
+                ("nhm", ("nhm_",)),
+                ("nhw", ("nhw_",)),
+                ("ngm", ("cd_ngm_", "_ngm_")),
+            ]
+            for prefix, patterns in rig_patterns:
+                if any(pat in paa_name for pat in patterns):
+                    rig_prefix = prefix
+                    break
+            # All PABs in the same group + root 'character/' dir.
+            all_pabs = [
+                e.path.replace("\\", "/")
+                for e in pamt.file_entries
+                if e.path.lower().endswith(".pab")
+            ]
+            candidates: list[str] = []
+            if rig_prefix:
+                # Prefer rigs starting with the detected prefix (e.g. 'phm_01.pab').
+                prefixed = [p for p in all_pabs
+                            if os.path.basename(p).lower().startswith(rig_prefix + "_")]
+                # Within rig family, prefer the shortest (base) rig.
+                prefixed.sort(key=lambda p: (len(os.path.basename(p)), p))
+                candidates.extend(prefixed)
+            # Fallback chain: same dir, then shortest pab overall.
+            base_dir = os.path.dirname(entry.path.replace("\\", "/"))
+            dir_pabs = [p for p in all_pabs if p.startswith(base_dir + "/")]
+            dir_pabs.sort(key=len)
+            candidates.extend(dir_pabs)
+            # De-dup preserving order.
+            seen = set()
+            ordered = []
+            for c in candidates:
+                if c not in seen:
+                    seen.add(c); ordered.append(c)
+            for cand in ordered[:1]:
+                pab_entry = next(
+                    e for e in pamt.file_entries
+                    if e.path.replace("\\", "/") == cand
+                )
+                pab_bytes = self._vfs.read_entry_data(pab_entry)
+                skeleton = parse_pab(pab_bytes, os.path.basename(cand))
+                logger.info(
+                    "PAA->FBX skeleton matched: rig=%s, file=%s",
+                    rig_prefix or "?", os.path.basename(cand),
+                )
+                break
+        except Exception as exc:
+            logger.debug("PAA->FBX skeleton lookup failed: %s", exc)
+
+        if skeleton is None:
+            skeleton = Skeleton(path="", bones=[], bone_count=anim.bone_count or 0)
+
+        out_dir = pick_directory(self, "Choose FBX output directory")
+        if not out_dir:
+            return
+
+        try:
+            fbx_path = export_animation_fbx(
+                anim, skeleton, out_dir,
+                name=os.path.splitext(os.path.basename(entry.path))[0],
+            )
+            show_info(
+                self, "Animation exported",
+                f"Wrote {fbx_path}\n\n"
+                f"Duration: {anim.duration:.2f}s   "
+                f"Frames: {anim.frame_count}   "
+                f"Bones: {anim.bone_count}\n"
+                f"Skeleton names: "
+                f"{'resolved from ' + os.path.basename(skeleton.path) if skeleton.bones else 'placeholders (Bone_N)'}",
+            )
+        except Exception as exc:
+            show_error(self, "FBX export failed", str(exc))
+
+    def _dump_hkx_json(self, entry: PamtFileEntry):
+        """Dump an HKX to JSON using the Layer 5 HkxDocument facade."""
+        from ui.dialogs.file_picker import pick_save_file
+        from ui.dialogs.confirmation import show_error, show_info
+        from core.havok_tag0_document import HkxDocument
+
+        try:
+            data = self._vfs.read_entry_data(entry)
+            hkx = HkxDocument.load(data)
+        except Exception as exc:
+            show_error(self, "HKX load failed", str(exc))
+            return
+
+        save_path = pick_save_file(
+            self, "Save HKX JSON dump",
+            default_name=os.path.splitext(os.path.basename(entry.path))[0] + ".hkx.json",
+            filters="JSON (*.json);;All (*.*)",
+        )
+        if not save_path:
+            return
+
+        try:
+            text = hkx.to_json(indent=2)
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            show_info(
+                self, "HKX dumped",
+                f"Wrote {save_path}\n\n"
+                f"SDK: {hkx.sdk_version}\n"
+                f"Types: {len(hkx.registry.types)}\n"
+                f"Instances: {sum(1 for _ in hkx.iter_instances())}\n"
+                f"Patches: {len(hkx.index.patches)} blocks",
+            )
+        except Exception as exc:
+            show_error(self, "HKX JSON export failed", str(exc))
+
+    def _hkx_risk_report(self, entry: PamtFileEntry):
+        """Show the physics-edit-risk verdict for an HKX file.
+
+        Uses ``core.havok_parser.assess_mesh_edit_risk`` which recognises
+        cloth / softbody / mesh-shape / ragdoll / rigid body classes
+        and produces severity + reasons. The result is the same block
+        the mesh-sidecar service exposes before a mesh edit commits.
+        """
+        from ui.dialogs.confirmation import show_info, show_error
+        from core.havok_parser import assess_mesh_edit_risk
+
+        try:
+            data = self._vfs.read_entry_data(entry)
+            risk = assess_mesh_edit_risk(data)
+        except Exception as exc:
+            show_error(self, "HKX risk assessment failed", str(exc))
+            return
+
+        if risk.severity == "none":
+            msg = "No physics-binding classes detected. Safe to edit the paired mesh."
+        else:
+            msg = risk.format_message(hkx_path=entry.path)
+        show_info(self, f"Physics risk: {risk.severity.upper()}", msg)
+
+    def _diagnose_dye(self, entry: PamtFileEntry):
+        """Run the dye-system diagnostic for a mesh prefab.
+
+        The query is built from the mesh basename without the extension
+        — so ``character/cd_phm_00_cloak_0060.pac`` maps to the prefab
+        lookup ``cd_phm_00_cloak_0060``. The diagnostic reports whether
+        the prefab is registered as dyeable and tells the modder
+        whether a raw .dds edit will take effect.
+        """
+        from ui.dialogs.confirmation import show_info, show_error
+        from core.dye_diagnostics import diagnose_armor_dye
+
+        base = os.path.splitext(os.path.basename(entry.path))[0]
+        try:
+            report = diagnose_armor_dye(self._vfs, base)
+        except Exception as exc:
+            show_error(self, "Dye diagnostic failed", str(exc))
+            return
+
+        show_info(
+            self, f"Dye diagnostic: {base}",
+            report.format_message(),
+        )
+
     def _import_mesh(self, entry: PamtFileEntry):
         """Import an OBJ file, rebuild the mesh, and preview the result."""
         obj_path = pick_file(self, "Select OBJ File", filters="OBJ Files (*.obj);;All Files (*.*)")
@@ -1061,7 +1655,11 @@ class ExplorerTab(QWidget):
             temp_path = os.path.join(self._temp_dir, basename)
             with open(temp_path, "wb") as f:
                 f.write(new_data)
-            self._preview.preview_file(temp_path)
+            self._preview.preview_file(
+                temp_path,
+                vfs=self._vfs,
+                vfs_path=entry.path.replace("\\", "/"),
+            )
 
             # Store for potential patching
             self._pending_mesh_data[entry.path.lower()] = {
@@ -1192,7 +1790,11 @@ class ExplorerTab(QWidget):
                 temp_path = os.path.join(self._temp_dir, basename)
                 with open(temp_path, "wb") as f:
                     f.write(new_data)
-                self._preview.preview_file(temp_path)
+                self._preview.preview_file(
+                    temp_path,
+                    vfs=self._vfs,
+                    vfs_path=entry.path.replace("\\", "/"),
+                )
                 self._progress.set_status(
                     f"Patched {entry.path}: {imported.total_vertices:,} verts, "
                     f"{imported.total_faces:,} faces"

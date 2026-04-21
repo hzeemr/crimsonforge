@@ -1383,12 +1383,19 @@ def _find_pac_section_layout(
     descriptors: list[PacDescriptor],
     lod: int,
     total_indices: int,
+    stride: int = 40,
 ) -> tuple[int, int]:
-    """Find the vertex/index split inside a decompressed PAC geometry section."""
+    """Find the vertex/index split inside a decompressed PAC geometry section.
+
+    ``stride`` is the vertex record size in bytes. Callers that know the
+    stride from prior detection should pass it in explicitly; the default
+    of 40 matches every observed shipping PAC at the time of writing and
+    keeps the layout solver sound for the common case.
+    """
     sec_off = geom_sec["offset"]
     sec_size = geom_sec["size"]
     total_verts = sum(d.vertex_counts[lod] for d in descriptors)
-    primary_bytes = total_verts * 40
+    primary_bytes = total_verts * stride
     index_bytes = total_indices * 2
 
     if primary_bytes + index_bytes >= sec_size:
@@ -1407,7 +1414,7 @@ def _find_pac_section_layout(
     def _available_vertices(v_start: int, i_start: int) -> int:
         if i_start <= v_start:
             return 0
-        return max(0, (i_start - v_start) // 40)
+        return max(0, (i_start - v_start) // stride)
 
     def _scan_idx_start(after_verts: int) -> Optional[int]:
         for adj in range(0, sec_size - after_verts, 2):
@@ -1449,8 +1456,8 @@ def _find_pac_section_layout(
 
         preview_positions = []
         for i in range(needed_vc):
-            rec_off = sec_off + v_start + i * 40
-            if rec_off + 40 > len(data):
+            rec_off = sec_off + v_start + i * stride
+            if rec_off + stride > len(data):
                 return float("inf")
             xu, yu, zu = struct.unpack_from("<HHH", data, rec_off)
             preview_positions.append((
@@ -1470,13 +1477,13 @@ def _find_pac_section_layout(
             total_edge += max(e0, e1, e2)
         return total_edge
 
-    secondary_bytes = (gap // 40) * 40
+    secondary_bytes = (gap // stride) * stride
     best_v_start = 0
     best_i_start = primary_bytes + secondary_bytes
     best_quality = _measure_quality(best_v_start, best_i_start)
 
-    for n_secondary in range(0, gap // 40 + 1):
-        v_start = n_secondary * 40
+    for n_secondary in range(0, gap // stride + 1):
+        v_start = n_secondary * stride
         all_verts_end = v_start + primary_bytes
         if all_verts_end >= sec_size:
             break
@@ -1519,15 +1526,30 @@ def parse_pac(data: bytes, filename: str = "") -> ParsedMesh:
 
     geom_sec = sec_by_idx[geom_section_idx]
     lod = 4 - geom_section_idx
+
+    # Detect the vertex record stride from the LOD0 section before we compute
+    # the vertex/index split. Every shipping PAC observed so far uses 40-byte
+    # records (the 0x3C000000 marker at +12 resolves uniquely at stride=40),
+    # but the detector degrades gracefully to other strides in the 6..64 range
+    # so non-standard PACs — if the engine ever ships any — still parse.
+    preliminary_split = geom_sec["offset"] + geom_sec["size"]
+    stride = _detect_pac_vertex_stride(
+        data,
+        geom_sec["offset"],
+        preliminary_split,
+    ) or 40
+
     total_indices = sum(d.index_counts[lod] for d in descriptors)
-    vert_base, idx_byte_offset = _find_pac_section_layout(data, geom_sec, descriptors, lod, total_indices)
+    vert_base, idx_byte_offset = _find_pac_section_layout(
+        data, geom_sec, descriptors, lod, total_indices, stride=stride
+    )
     index_region_start = idx_byte_offset
 
     desc_vert_offsets = []
     vert_cursor = vert_base
     for desc in descriptors:
         desc_vert_offsets.append(vert_cursor)
-        vert_cursor += desc.vertex_counts[lod] * 40
+        vert_cursor += desc.vertex_counts[lod] * stride
 
     for di, desc in enumerate(descriptors):
         vc = desc.vertex_counts[lod]
@@ -1550,7 +1572,7 @@ def parse_pac(data: bytes, filename: str = "") -> ParsedMesh:
                 vertex_owner_idx = partner_idx
                 owner_vc = descriptors[partner_idx].vertex_counts[lod]
             else:
-                available_vc = max(0, (index_region_start - desc_vert_offsets[di]) // 40)
+                available_vc = max(0, (index_region_start - desc_vert_offsets[di]) // stride)
                 if max_idx < available_vc:
                     owner_vc = max_idx + 1
 
@@ -1563,8 +1585,8 @@ def parse_pac(data: bytes, filename: str = "") -> ParsedMesh:
         bone_weights = []
 
         for vi in range(owner_vc):
-            rec_off = geom_sec["offset"] + vertex_start + vi * 40
-            if rec_off + 40 > len(data):
+            rec_off = geom_sec["offset"] + vertex_start + vi * stride
+            if rec_off + stride > len(data):
                 break
             pos, uv, normal, bones, weights = _decode_pac_vertex_record(data, rec_off, desc)
             verts.append(pos)
@@ -1596,7 +1618,7 @@ def parse_pac(data: bytes, filename: str = "") -> ParsedMesh:
             source_vertex_offsets=source_offsets,
             source_index_offset=geom_sec["offset"] + idx_byte_offset,
             source_index_count=len(indices),
-            source_vertex_stride=40,
+            source_vertex_stride=stride,
             source_descriptor_offset=desc.descriptor_offset,
             source_bbox_min=desc.bbox_min,
             source_bbox_extent=desc.bbox_extent,
@@ -1689,14 +1711,25 @@ def _build_pac_preview_mesh(data: bytes, filename: str = "") -> PreviewMesh:
     if not descriptors:
         return _flatten_parsed_mesh_for_preview(parse_pac(data, filename))
 
+    # Detect vertex stride from the LOD0 section — same logic as the full
+    # parser above. Falls back to 40 for non-detectable cases, which matches
+    # every observed shipping PAC.
+    stride = _detect_pac_vertex_stride(
+        data,
+        geom_sec["offset"],
+        geom_sec["offset"] + geom_sec["size"],
+    ) or 40
+
     total_indices = sum(desc.index_counts[lod] for desc in descriptors)
-    vert_base, idx_byte_offset = _find_pac_section_layout(data, geom_sec, descriptors, lod, total_indices)
+    vert_base, idx_byte_offset = _find_pac_section_layout(
+        data, geom_sec, descriptors, lod, total_indices, stride=stride,
+    )
 
     desc_vert_offsets = []
     cursor = vert_base
     for desc in descriptors:
         desc_vert_offsets.append(cursor)
-        cursor += desc.vertex_counts[lod] * 40
+        cursor += desc.vertex_counts[lod] * stride
 
     preview = PreviewMesh(format="pac")
     desc_output_offset: dict[int, int] = {}
@@ -1733,8 +1766,8 @@ def _build_pac_preview_mesh(data: bytes, filename: str = "") -> PreviewMesh:
                 desc_output_offset[di] = vert_offset
                 emitted = 0
                 for vi in range(source_vc):
-                    rec_off = geom_sec["offset"] + source_offset + vi * 40
-                    if rec_off + 40 > len(data):
+                    rec_off = geom_sec["offset"] + source_offset + vi * stride
+                    if rec_off + stride > len(data):
                         break
                     pos, _, normal, _, _ = _decode_pac_vertex_record(data, rec_off, desc)
                     preview.vertices.append(pos)
@@ -1749,8 +1782,8 @@ def _build_pac_preview_mesh(data: bytes, filename: str = "") -> PreviewMesh:
             desc_output_offset[di] = vert_offset
             emitted = 0
             for vi in range(vc):
-                rec_off = geom_sec["offset"] + vert_byte_offset + vi * 40
-                if rec_off + 40 > len(data):
+                rec_off = geom_sec["offset"] + vert_byte_offset + vi * stride
+                if rec_off + stride > len(data):
                     break
                 pos, _, normal, _, _ = _decode_pac_vertex_record(data, rec_off, desc)
                 preview.vertices.append(pos)

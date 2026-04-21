@@ -108,8 +108,14 @@ def parse_pab(data: bytes, filename: str = "") -> Skeleton:
         bone.name = data[name_start:name_end].decode('ascii', 'replace')
         off = name_end
 
-        # Parent index: find FFFFFFFF (root = -1) or a valid small int
-        # The parent field immediately follows the name (possibly after null bytes)
+        # Parent index: 4-byte int immediately follows the name (often
+        # after a single null terminator). We scan a small window for
+        # -1 or a plausible small int to tolerate varying padding.
+        # NOTE: starting the scan at off (name_end) means the null
+        # terminator can be picked up as "parent=0". That's a wart of
+        # this heuristic parser but can't be strictly fixed without
+        # full format reversal — the float validator below catches
+        # the downstream damage.
         parent_found = False
         scan_end = min(off + 16, len(data) - 4)
         for scan in range(off, scan_end):
@@ -152,6 +158,26 @@ def parse_pab(data: bytes, filename: str = "") -> Skeleton:
             off += 12
 
         # Skip any remaining padding/data to align with next bone hash
+        # Validate bone before accepting it. The heuristic-based
+        # forward scan for "next uppercase letter" above is unreliable
+        # on binary payload data — random floats routinely contain
+        # bytes in the 65..90 (A-Z) range, which causes the parser to
+        # emit phantom bones with random names and garbage positions.
+        # Stop parsing at the first clearly-bogus bone so downstream
+        # exporters (FBX etc.) don't trip over inf / NaN / 10^30
+        # positions that crash Blender's importer.
+        import math as _math
+        def _is_bad_float(v):
+            return _math.isnan(v) or _math.isinf(v) or abs(v) > 1e5
+        if any(_is_bad_float(v) for v in bone.position) or \
+           any(_is_bad_float(v) for v in bone.rotation) or \
+           any(_is_bad_float(v) for v in bone.scale):
+            logger.debug(
+                "PAB %s: stopping at bone %d (%r) — garbage float detected",
+                filename, i, bone.name,
+            )
+            break
+
         # Next bone starts with a 4-byte hash before its name
         # Scan forward for next uppercase letter (bone name start)
         if i < bone_count - 1:
@@ -163,6 +189,8 @@ def parse_pab(data: bytes, filename: str = "") -> Skeleton:
 
         skeleton.bones.append(bone)
 
+    # Update the true bone count after validation-induced truncation.
+    skeleton.bone_count = len(skeleton.bones)
     logger.info("Parsed PAB %s: %d bones", filename, len(skeleton.bones))
     return skeleton
 

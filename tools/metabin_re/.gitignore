@@ -1,0 +1,11 @@
+# Build intermediates
+*.obj
+*.lib
+*.exp
+*.pdb
+*.o
+
+# Re-builds of the ready-to-run binaries in injector/ and helper_dll/
+# ARE tracked. Users expect to clone the repo and run immediately.
+# If you rebuild them with different compilers, do commit the new
+# versions so the README's quick-start works out of the box.

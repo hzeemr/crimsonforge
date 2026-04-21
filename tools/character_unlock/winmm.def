@@ -1,0 +1,14 @@
+LIBRARY winmm
+EXPORTS
+    timeGetTime
+    timeBeginPeriod
+    timeEndPeriod
+    timeGetDevCaps
+    waveOutGetNumDevs
+    waveOutOpen
+    waveOutClose
+    waveOutWrite
+    waveOutPrepareHeader
+    waveOutUnprepareHeader
+    waveOutReset
+    waveOutGetPosition

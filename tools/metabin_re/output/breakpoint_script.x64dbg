@@ -1,0 +1,72 @@
+// AnimationMetaData breakpoint script
+// Run with: x64dbg → Plugins → Script → Load
+// Or paste in Commands tab
+
+log "=== AnimationMetaData RTTI ==="
+log "TypeDescriptor: 0x145B5A6B8"
+log "COL: 0x145036468"
+log "COL: 0x145036720"
+log "COL: 0x145036748"
+
+// --- Vtable 0 @ VA 0x144C87298 ---
+bp 0x141EF4250    // vtable[0].vfunc[0]
+SetBreakpointCondition 0x141EF4250, "0"
+SetBreakpointLog 0x141EF4250, "vt0.vf0 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x141EF6C10    // vtable[0].vfunc[1]
+SetBreakpointCondition 0x141EF6C10, "0"
+SetBreakpointLog 0x141EF6C10, "vt0.vf1 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x140F87E90    // vtable[0].vfunc[2]
+SetBreakpointCondition 0x140F87E90, "0"
+SetBreakpointLog 0x140F87E90, "vt0.vf2 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x140F87E90    // vtable[0].vfunc[3]
+SetBreakpointCondition 0x140F87E90, "0"
+SetBreakpointLog 0x140F87E90, "vt0.vf3 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x14035C3B0    // vtable[0].vfunc[4]
+SetBreakpointCondition 0x14035C3B0, "0"
+SetBreakpointLog 0x14035C3B0, "vt0.vf4 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x1402B0690    // vtable[0].vfunc[5]
+SetBreakpointCondition 0x1402B0690, "0"
+SetBreakpointLog 0x1402B0690, "vt0.vf5 this=[rcx] bytes={bytes(rcx, 0x20)}"
+
+// --- Vtable 1 @ VA 0x144C87810 ---
+bp 0x141EF7254    // vtable[1].vfunc[0]
+SetBreakpointCondition 0x141EF7254, "0"
+SetBreakpointLog 0x141EF7254, "vt1.vf0 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x140EE7950    // vtable[1].vfunc[1]
+SetBreakpointCondition 0x140EE7950, "0"
+SetBreakpointLog 0x140EE7950, "vt1.vf1 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x1450366F8    // vtable[1].vfunc[2]
+SetBreakpointCondition 0x1450366F8, "0"
+SetBreakpointLog 0x1450366F8, "vt1.vf2 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x1404C70E0    // vtable[1].vfunc[3]
+SetBreakpointCondition 0x1404C70E0, "0"
+SetBreakpointLog 0x1404C70E0, "vt1.vf3 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x1402B0740    // vtable[1].vfunc[4]
+SetBreakpointCondition 0x1402B0740, "0"
+SetBreakpointLog 0x1402B0740, "vt1.vf4 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x1402B0740    // vtable[1].vfunc[5]
+SetBreakpointCondition 0x1402B0740, "0"
+SetBreakpointLog 0x1402B0740, "vt1.vf5 this=[rcx] bytes={bytes(rcx, 0x20)}"
+
+// --- Vtable 2 @ VA 0x144C87288 ---
+bp 0x141EF726C    // vtable[2].vfunc[0]
+SetBreakpointCondition 0x141EF726C, "0"
+SetBreakpointLog 0x141EF726C, "vt2.vf0 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x145036468    // vtable[2].vfunc[1]
+SetBreakpointCondition 0x145036468, "0"
+SetBreakpointLog 0x145036468, "vt2.vf1 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x141EF4250    // vtable[2].vfunc[2]
+SetBreakpointCondition 0x141EF4250, "0"
+SetBreakpointLog 0x141EF4250, "vt2.vf2 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x141EF6C10    // vtable[2].vfunc[3]
+SetBreakpointCondition 0x141EF6C10, "0"
+SetBreakpointLog 0x141EF6C10, "vt2.vf3 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x140F87E90    // vtable[2].vfunc[4]
+SetBreakpointCondition 0x140F87E90, "0"
+SetBreakpointLog 0x140F87E90, "vt2.vf4 this=[rcx] bytes={bytes(rcx, 0x20)}"
+bp 0x140F87E90    // vtable[2].vfunc[5]
+SetBreakpointCondition 0x140F87E90, "0"
+SetBreakpointLog 0x140F87E90, "vt2.vf5 this=[rcx] bytes={bytes(rcx, 0x20)}"
+
+log "All breakpoints set. Press F9 to resume. Attach PAA trigger"
+log "in-game (e.g., play an animation) — watch the log."

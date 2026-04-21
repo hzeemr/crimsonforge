@@ -70,9 +70,9 @@ EXTENSION_MAP = {
     ".paa":     FileTypeInfo("binary", "application/x-paa", "PA Animation", ".paa", False, False),
     ".paa_metabin": FileTypeInfo("binary", "application/x-paa-meta", "Animation Metadata", ".paa_metabin", False, False),
     # Game data
-    ".pabgb":   FileTypeInfo("binary", "application/x-pabgb", "Game Data Binary", ".pabgb", False, False),
+    ".pabgb":   FileTypeInfo("binary", "application/x-pabgb", "Game Data Table", ".pabgb", True, False),
     ".pae":     FileTypeInfo("binary", "application/x-pae", "PA Effect", ".pae", False, False),
-    ".prefab":  FileTypeInfo("binary", "application/x-prefab", "Prefab Asset", ".prefab", False, False),
+    ".prefab":  FileTypeInfo("binary", "application/x-prefab", "Prefab Asset", ".prefab", True, False),
     ".pampg":   FileTypeInfo("binary", "application/x-pampg", "PAM Page Data", ".pampg", False, False),
     ".paseq":   FileTypeInfo("binary", "application/x-paseq", "PA Sequencer", ".paseq", False, False),
     ".paseqc":  FileTypeInfo("binary", "application/x-paseqc", "PA Sequencer Config", ".paseqc", False, False),
@@ -146,7 +146,7 @@ EXTENSION_MAP = {
     ".pat":    FileTypeInfo("binary", "application/x-pat", "Terrain Data", ".pat", False, False),
     ".imp":     FileTypeInfo("binary", "application/x-imp", "Import Definition", ".imp", False, False),
     # Project / Save
-    ".prefab":  FileTypeInfo("binary", "application/x-prefab", "Prefab Asset", ".prefab", False, False),
+    ".prefab":  FileTypeInfo("binary", "application/x-prefab", "Prefab Asset", ".prefab", True, False),
     ".save":    FileTypeInfo("binary", "application/x-save", "Save Data", ".save", False, False),
     ".paproj":  FileTypeInfo("text", "application/xml", "Project File (XML)", ".paproj", True, True),
     ".paprojdesc": FileTypeInfo("text", "text/plain", "Project Description", ".paprojdesc", True, True),

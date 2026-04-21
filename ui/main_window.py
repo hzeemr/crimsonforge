@@ -83,6 +83,26 @@ class MainWindow(QMainWindow):
 
         # Lazy tab tracking: index → real widget (None until materialised)
         self._real_tabs: dict[int, QWidget] = {}
+        # TabInitContainer wrappers keyed by the same tab index. The
+        # container hosts both the tab's real widget and a loading
+        # overlay; we use it to flip between "Loading..." and real
+        # contents without blocking the UI thread.
+        self._tab_containers: dict[int, QWidget] = {}
+        # Per-tab background-init state. One of:
+        #   None      — never touched
+        #   "loading" — worker is running, overlay visible
+        #   "ready"   — init finished successfully, content shown
+        #   "error"   — init failed, overlay shows retry button
+        self._tab_init_state: dict[int, str] = {}
+        # Active background workers keyed by tab index so we can
+        # cancel / replace them if the user triggers a retry mid-load.
+        self._tab_workers: dict[int, FunctionWorker] = {}
+        # Indices currently in phase-1 or phase-2 of the three-phase
+        # lazy materialisation path (see _on_tab_changed). Guards
+        # against Qt's ``currentChanged`` signal re-entering during
+        # the tab swap or during the QTimer.singleShot construction
+        # window.
+        self._tabs_materialising: set[int] = set()
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - Crimson Desert Modding Studio")
         self.setMinimumSize(1100, 700)
@@ -144,10 +164,38 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, self._auto_discover_and_load)
 
     # ------------------------------------------------------------------
-    # Lazy tab materialisation
+    # Lazy tab materialisation — three phases to keep the UI responsive.
+    #
+    # The naïve "build widget + init" flow blocks the UI thread twice:
+    # once during the expensive widget constructor (module import, big
+    # splitter trees, language-config combo population) and once
+    # during ``initialize_from_game`` (100K+ audio entries, paloc
+    # cross-ref). Breaking the work into three phases ensures the
+    # overlay paints *before* any slow work starts:
+    #
+    #   Phase 1 — install an overlay-only container (<5 ms, UI thread)
+    #             Runs inside ``_on_tab_changed`` with signals blocked
+    #             so Qt's ``currentChanged`` cannot re-enter.
+    #
+    #   Phase 2 — deferred via ``QTimer.singleShot(0, …)`` so the
+    #             overlay has a chance to paint first. Does the heavy
+    #             module import + widget constructor on the UI thread
+    #             (Qt widgets must be created on the UI thread).
+    #             Swaps the constructed widget into the container.
+    #
+    #   Phase 3 — background ``initialize_from_game`` via
+    #             ``FunctionWorker``. Progress feeds the overlay.
+    #
+    # Eager call sites (``_on_load_finished`` for Explorer, Settings
+    # + About in ``__init__``) still use :meth:`_materialise_tab`
+    # synchronously because they run during the main loading screen
+    # or at app startup where a short UI stall is acceptable.
     # ------------------------------------------------------------------
     def _materialise_tab(self, index: int) -> QWidget:
-        """Import, construct, and swap in the real tab widget for *index*."""
+        """Synchronously import, construct, and swap in the real tab
+        widget for *index*. Used by eager call sites only — user-
+        driven tab clicks go through the three-phase path below.
+        """
         if index in self._real_tabs:
             return self._real_tabs[index]
 
@@ -155,40 +203,163 @@ class MainWindow(QMainWindow):
         if not entry.get("lazy", False):
             return self._tabs.widget(index)
 
+        widget = self._construct_tab_widget(entry)
+
+        # Wrap in a loading-overlay container so we can swap between
+        # "Loading..." and real contents without blocking the UI later.
+        from ui.widgets.tab_loading_overlay import TabInitContainer
+        container = TabInitContainer(widget)
+        container.overlay.retry_requested.connect(
+            lambda _i=index, _w=widget: self._init_tab_from_game(_i, _w)
+        )
+        # Default to CONTENT view — eager materialisation implies the
+        # caller is about to init synchronously (or the tab doesn't
+        # need init at all).
+        container.show_content()
+
+        self._swap_tab_widget(index, container)
+        self._real_tabs[index] = widget
+        self._tab_containers[index] = container
+        logger.debug("Materialised tab %d (%s) synchronously", index, entry["label"])
+        return widget
+
+    # ---- Phase helpers ----------------------------------------------------
+
+    def _construct_tab_widget(self, entry: dict) -> QWidget:
+        """Import the tab's module and construct its widget. Runs on
+        the UI thread — Qt widget construction is not thread-safe.
+        """
         import importlib
         mod = importlib.import_module(entry["module"])
         cls = getattr(mod, entry["cls"])
 
         args_key = entry.get("args")
         if args_key == "config":
-            widget = cls(self._config)
-        elif args_key == "config_registry":
-            widget = cls(self._config, self._registry)
-        elif args_key == "config_kw":
-            widget = cls(config=self._config)
-        else:
-            widget = cls()
+            return cls(self._config)
+        if args_key == "config_registry":
+            return cls(self._config, self._registry)
+        if args_key == "config_kw":
+            return cls(config=self._config)
+        return cls()
 
-        # Swap placeholder with the real widget, keeping the same index/label
+    def _swap_tab_widget(self, index: int, new_widget: QWidget) -> None:
+        """Replace the widget at *index* in the tab bar with
+        ``new_widget``. Blocks ``currentChanged`` during the swap so
+        Qt's internal "current index moved because the tab at that
+        slot disappeared" side-effect can't re-enter
+        :meth:`_on_tab_changed`. Preserves enabled-state + the user's
+        currently-selected tab across the swap.
+        """
         old = self._tabs.widget(index)
         label = self._tabs.tabText(index)
         enabled = self._tabs.isTabEnabled(index)
-        self._tabs.removeTab(index)
-        self._tabs.insertTab(index, widget, label)
-        self._tabs.setTabEnabled(index, enabled)
-        if old is not None:
+        current = self._tabs.currentIndex()
+
+        self._tabs.blockSignals(True)
+        try:
+            self._tabs.removeTab(index)
+            self._tabs.insertTab(index, new_widget, label)
+            self._tabs.setTabEnabled(index, enabled)
+            if current < self._tabs.count():
+                self._tabs.setCurrentIndex(current)
+        finally:
+            self._tabs.blockSignals(False)
+
+        if old is not None and old is not new_widget:
             old.deleteLater()
 
+    def _install_overlay_container(self, index: int, label: str) -> "QWidget":
+        """Phase 1: install an overlay-only ``TabInitContainer`` at
+        *index* and return it. Cheap (<5 ms) — no module import, no
+        widget constructor, no background worker. The overlay starts
+        in the ``loading`` state so the user sees *something* on the
+        very next paint.
+        """
+        from ui.widgets.tab_loading_overlay import TabInitContainer
+
+        container = TabInitContainer(None)          # no real content yet
+        container.overlay.start_loading(label)
+        self._swap_tab_widget(index, container)
+        self._tab_containers[index] = container
+        return container
+
+    def _finish_tab_materialisation(self, index: int) -> None:
+        """Phase 2: run on the UI thread one event-loop tick after
+        phase 1 so the overlay has painted. Imports the tab module,
+        constructs the widget, installs it into the container, then
+        kicks off phase 3 (background init) if the game is loaded.
+        """
+        # The user may have interrupted the flow (app closing, tab
+        # somehow removed, etc.). Bail cleanly.
+        container = self._tab_containers.get(index)
+        if container is None:
+            self._tabs_materialising.discard(index)
+            return
+
+        entry = _TAB_REGISTRY[index]
+        label = entry["label"]
+        try:
+            widget = self._construct_tab_widget(entry)
+        except Exception as e:
+            logger.exception("Failed to construct tab %d (%s): %s", index, label, e)
+            container.overlay.finish_error(
+                f"Couldn't load {label}",
+                f"{type(e).__name__}: {e}",
+            )
+            self._tab_init_state[index] = "error"
+            self._tabs_materialising.discard(index)
+            return
+
+        container.set_content(widget)
+        container.overlay.retry_requested.connect(
+            lambda _i=index, _w=widget: self._init_tab_from_game(_i, _w)
+        )
         self._real_tabs[index] = widget
-        logger.debug("Materialised tab %d (%s)", index, label)
-        return widget
+        self._tabs_materialising.discard(index)
+        logger.debug("Materialised tab %d (%s) via deferred path", index, label)
+
+        # Phase 3: background initialize_from_game (only if needed).
+        if self._game_loaded and self._tab_init_state.get(index) != "ready":
+            self._init_tab_from_game(index, widget)
+        else:
+            container.show_content()
+            self._tab_init_state[index] = "ready"
 
     def _on_tab_changed(self, index: int):
-        """Materialise the tab on first click and initialise if game is loaded."""
-        if index not in self._real_tabs:
-            widget = self._materialise_tab(index)
-            if self._game_loaded:
-                self._init_tab_from_game(index, widget)
+        """Materialise the tab on first click + kick off background init.
+
+        Three-phase: overlay → construct → init. Every slow step runs
+        off the UI-thread paint loop so the window stays responsive.
+        Subsequent clicks on a tab whose init already completed skip
+        everything.
+        """
+        # Already fully materialised — subsequent click, nothing to do.
+        if index in self._real_tabs:
+            # If init is still pending (because the tab was materialised
+            # before the game loaded), kick it off now.
+            if self._game_loaded and self._tab_init_state.get(index) != "ready" \
+                    and self._tab_init_state.get(index) != "loading":
+                self._init_tab_from_game(index, self._real_tabs[index])
+            return
+
+        # Already mid-materialisation — phase 1 or phase 2 in flight.
+        if index in self._tabs_materialising:
+            return
+
+        entry = _TAB_REGISTRY[index]
+        if not entry.get("lazy", False):
+            return
+
+        label = entry["label"]
+        self._tabs_materialising.add(index)
+
+        # Phase 1 — instant overlay swap (UI thread, signals blocked).
+        self._install_overlay_container(index, label)
+
+        # Phase 2 — deferred widget construction. Zero-delay singleShot
+        # means Qt processes paint events first, so the overlay shows
+        # before the heavy constructor starts.
+        QTimer.singleShot(0, lambda i=index: self._finish_tab_materialisation(i))
 
     def _tab(self, index: int) -> QWidget | None:
         """Return the real tab at *index* or None if not yet materialised."""
@@ -636,29 +807,113 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Per-tab lazy initialisation (called when a tab is first shown)
     # ------------------------------------------------------------------
-    def _init_tab_from_game(self, index: int, widget: QWidget):
-        """Initialise a single tab from game data. Called lazily on first click."""
-        try:
-            if index == 1:   # Explorer (usually already done in _on_load_finished)
-                if not hasattr(widget, '_game_initialized'):
+    # Which tabs are cheap enough to init on the UI thread, and which
+    # need the background worker? Everything that touches the game VFS
+    # (PAMT scans, paloc cross-refs, catalog builds) goes async.
+    _TABS_NEEDING_ASYNC_INIT = frozenset({2, 3, 4, 5, 6, 7})
+
+    def _init_tab_from_game(self, index: int, widget: QWidget) -> None:
+        """Initialise a single tab from game data.
+
+        Tab 1 (Explorer) is already initialised eagerly on startup, so
+        we only re-run it if the eager path was somehow skipped. Every
+        other tab runs its init on a background QThread with a loading
+        overlay on the tab, so the UI thread stays responsive during
+        the heavy work (5-30 s on a full game install for tabs that
+        index 100K+ entries like Audio, Dialogue Catalog, etc.).
+        """
+        # Explorer is already initialised synchronously during the
+        # main window's initial background load. Handle it inline.
+        if index == 1:
+            try:
+                if not hasattr(widget, "_game_initialized"):
                     widget.initialize_from_game(self._vfs, self._all_groups)
                     widget.files_extracted.connect(self._on_files_extracted)
                     widget._game_initialized = True
-            elif index == 2:  # Item Catalog
+                self._tab_init_state[index] = "ready"
+            except Exception as e:
+                logger.exception("Failed to initialise Explorer: %s", e)
+                self._tab_init_state[index] = "error"
+                show_error(self, "Tab Init Error",
+                           f"Failed to initialise Explorer: {e}")
+            return
+
+        if index not in self._TABS_NEEDING_ASYNC_INIT:
+            return
+
+        # If a worker is already running for this tab, let it finish.
+        existing = self._tab_workers.get(index)
+        if existing is not None and existing.isRunning():
+            logger.debug("init already running for tab %d", index)
+            return
+
+        container = self._tab_containers.get(index)
+        if container is None:
+            # No overlay container — shouldn't happen for lazy tabs
+            logger.warning("tab %d has no init container", index)
+            return
+
+        label = _TAB_REGISTRY[index]["label"]
+        container.overlay.start_loading(label)
+        container.show_overlay(label)
+        self._tab_init_state[index] = "loading"
+
+        def task(worker: FunctionWorker) -> None:
+            worker.report_progress(5, f"Preparing {label}…")
+            # Dispatch by tab index — mirror the old sync switch
+            if index == 2:     # Item Catalog
                 widget.initialize_from_game(self._vfs)
-            elif index == 3:  # Dialogue Catalog
+            elif index == 3:   # Dialogue Catalog
                 widget.initialize_from_game(self._vfs)
-            elif index == 4:  # Repack
+            elif index == 4:   # Repack
                 widget.initialize_from_game(self._packages_path)
-            elif index == 5:  # Translate
+            elif index == 5:   # Translate
                 widget.initialize_from_game(self._vfs, self._discovered_palocs)
-            elif index == 6:  # Audio
+            elif index == 6:   # Audio
                 widget.initialize_from_game(self._vfs, self._all_groups)
-            elif index == 7:  # Font
+            elif index == 7:   # Font
                 widget.initialize_from_game(self._vfs)
-        except Exception as e:
-            logger.exception("Failed to initialise tab %d: %s", index, e)
-            show_error(self, "Tab Init Error", f"Failed to initialise {_TAB_REGISTRY[index]['label']}: {e}")
+            worker.report_progress(100, f"{label} ready.")
+            return index
+
+        worker = FunctionWorker(task)
+        worker.progress.connect(
+            lambda pct, msg, c=container: c.overlay.set_progress(pct, msg)
+        )
+        worker.finished_result.connect(
+            lambda _idx, i=index: self._on_tab_init_finished(i)
+        )
+        worker.error_occurred.connect(
+            lambda err, i=index: self._on_tab_init_error(i, err)
+        )
+        self._tab_workers[index] = worker
+        worker.start()
+
+    def _on_tab_init_finished(self, index: int) -> None:
+        """Slot — tab's background init completed successfully."""
+        container = self._tab_containers.get(index)
+        if container is not None:
+            container.show_content()
+        self._tab_init_state[index] = "ready"
+        self._tab_workers.pop(index, None)
+        logger.info(
+            "Tab %d (%s) initialised asynchronously.",
+            index, _TAB_REGISTRY[index]["label"],
+        )
+
+    def _on_tab_init_error(self, index: int, err: str) -> None:
+        """Slot — tab's background init raised. Shows a Retry overlay."""
+        container = self._tab_containers.get(index)
+        label = _TAB_REGISTRY[index]["label"]
+        if container is not None:
+            container.overlay.finish_error(
+                f"Couldn't load {label}",
+                f"{err}\n\nClick Retry to try again.",
+            )
+            container.show_overlay(label)
+        self._tab_init_state[index] = "error"
+        self._tab_workers.pop(index, None)
+        logger.error("Tab %d (%s) init failed: %s", index, label, err)
 
     # ------------------------------------------------------------------
     # Misc

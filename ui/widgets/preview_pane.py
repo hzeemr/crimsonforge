@@ -72,6 +72,11 @@ class PreviewPane(QWidget):
         super().__init__(parent)
         self._current_path = ""
         self._vgmstream_installing = False
+        # VFS hints the Explorer passes through ``preview_file`` so the
+        # mesh preview can discover paired textures. Left unset when a
+        # file is previewed directly from the filesystem.
+        self._active_vfs = None
+        self._active_vfs_path = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -182,8 +187,15 @@ class PreviewPane(QWidget):
 
         self._stack.setCurrentIndex(IDX_EMPTY)
 
-    def preview_file(self, path: str) -> None:
-        """Preview a file based on its detected type."""
+    def preview_file(self, path: str, *, vfs=None, vfs_path: str = "") -> None:
+        """Preview a file based on its detected type.
+
+        ``vfs`` and ``vfs_path`` are optional hints the caller can pass when
+        the file being previewed originated from a game archive. Currently
+        only the mesh preview uses them, to discover and apply the paired
+        diffuse texture (``core.mesh_texture_service``). Leaving them
+        unset keeps the pure-filesystem preview path working unchanged.
+        """
         self._stop_media()
 
         if not os.path.isfile(path):
@@ -191,6 +203,8 @@ class PreviewPane(QWidget):
             return
 
         self._current_path = path
+        self._active_vfs = vfs
+        self._active_vfs_path = vfs_path
         size = os.path.getsize(path)
         file_info = detect_file_type(path)
         self._info_label.setText(
@@ -232,6 +246,8 @@ class PreviewPane(QWidget):
             self._show_font(path)
         elif ext in (".html", ".thtml", ".css"):
             self._show_web(path, ext)
+        elif ext == ".pabgb":
+            self._show_pabgb_table(path)
         elif file_info.category == "text" or file_info.can_edit:
             self._show_text(path)
         else:
@@ -247,15 +263,78 @@ class PreviewPane(QWidget):
         self._stack.setCurrentIndex(IDX_EMPTY)
 
     def _show_havok_info(self, path: str) -> None:
-        """Show Havok HKX file info with bone names."""
+        """Show Havok HKX summary using the Layer 1-5 parser stack.
+
+        Falls back to the legacy ``core.havok_parser.get_hkx_summary``
+        if the new TAG0 pipeline can't load the file — the two are
+        complementary (legacy scans heuristically, new stack fails
+        strict) so every file still renders something useful.
+        """
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except Exception as exc:
+            self._show_empty(f"HKX read error: {exc}")
+            return
+
+        lines: list[str] = []
+
+        # Primary path — HkxDocument summary + type registry +
+        # instance walker + physics risk verdict.
+        try:
+            from core.havok_tag0_document import HkxDocument
+            from core.havok_parser import assess_mesh_edit_risk
+
+            hkx = HkxDocument.safe_load(data)
+            if hkx is not None:
+                lines.append(hkx.summary())
+                lines.append("")
+
+                risk = assess_mesh_edit_risk(data)
+                if risk.severity != "none":
+                    lines.append(f"Physics edit risk: {risk.severity.upper()}")
+                    if risk.driving_systems:
+                        lines.append(f"  systems: {', '.join(risk.driving_systems)}")
+                    for r in risk.reasons:
+                        lines.append(f"  - {r}")
+                else:
+                    lines.append("Physics edit risk: none (skeleton / animation only)")
+                lines.append("")
+
+                classes = hkx.registry.types
+                if classes:
+                    lines.append(f"Classes ({len(classes)}):")
+                    for t in classes[:20]:
+                        lines.append(f"  {t.qualified_name()}")
+                    if len(classes) > 20:
+                        lines.append(f"  ... ({len(classes) - 20} more)")
+                    lines.append("")
+
+                instances = list(hkx.iter_instances())
+                if instances:
+                    lines.append(f"Instances ({len(instances)}):")
+                    for inst in instances[:15]:
+                        lines.append(
+                            f"  [{inst.item.index:4d}] {inst.class_name}  "
+                            f"@0x{inst.offset:06X}  payload={len(inst.payload)}B  "
+                            f"flags=0x{inst.flags:02X}  count={inst.item.count}"
+                        )
+                    if len(instances) > 15:
+                        lines.append(f"  ... ({len(instances) - 15} more)")
+                self._text_edit.setPlainText("\n".join(lines))
+                self._stack.setCurrentIndex(IDX_TEXT)
+                return
+        except Exception as exc:
+            logger.debug("HkxDocument preview failed, falling back: %s", exc)
+
+        # Fallback: legacy string-scan summary.
         try:
             from core.havok_parser import get_hkx_summary
-            with open(path, "rb") as f:
-                summary = get_hkx_summary(f.read())
+            summary = get_hkx_summary(data)
             self._text_edit.setPlainText(summary)
             self._stack.setCurrentIndex(IDX_TEXT)
-        except Exception as e:
-            self._show_empty(f"HKX parse error: {e}")
+        except Exception as exc:
+            self._show_empty(f"HKX parse error: {exc}")
 
     def _show_nav_info(self, path: str) -> None:
         """Show navigation mesh info."""
@@ -293,7 +372,7 @@ class PreviewPane(QWidget):
             self._show_empty(f"PAB parse error: {e}")
 
     def _show_animation_info(self, path: str) -> None:
-        """Show PAA animation info."""
+        """Show PAA animation info with sparse-rig caveats and an export hint."""
         try:
             from core.animation_parser import parse_paa
             with open(path, "rb") as f:
@@ -302,14 +381,35 @@ class PreviewPane(QWidget):
                 self._show_empty("Not a valid PAA animation file")
                 return
             anim = parse_paa(data, os.path.basename(path))
+
+            total_quats = len(anim.raw_quaternions)
+            bones = anim.bone_count
+            frames = anim.frame_count
+            expected = max(1, bones) * max(1, frames)
+
             lines = [
                 f"=== PAA Animation ===",
-                f"Duration: {anim.duration:.2f}s",
-                f"Frames: {anim.frame_count}",
-                f"Bones: {anim.bone_count}",
-                f"Quaternions: {len(anim.raw_quaternions)}",
-                f"",
+                f"Duration:     {anim.duration:.2f}s",
+                f"Frames:       {frames}",
+                f"Bones (rig):  {bones}",
+                f"Quaternions:  {total_quats}",
             ]
+            # LOD animations carry a rig-wide bone count in the header
+            # but store only the subset of bones the animation actually
+            # touches. Surface this explicitly so the user doesn't get
+            # confused when 218 bones / 6 quats shows up on an LOD file.
+            if total_quats < expected and bones > 0 and frames == 1:
+                effective_bones = total_quats // frames if frames else total_quats
+                lines.append(
+                    f"Animated:     {effective_bones} bone(s) out of {bones} "
+                    f"(likely a sparse LOD pose)"
+                )
+            elif total_quats < expected:
+                lines.append(
+                    f"Warning:      quat count {total_quats} is less than "
+                    f"bones x frames ({expected}); later frames may be truncated"
+                )
+            lines.append("")
             if anim.keyframes:
                 lines.append("First frame bone rotations:")
                 kf = anim.keyframes[0]
@@ -317,6 +417,10 @@ class PreviewPane(QWidget):
                     lines.append(f"  Bone {i}: ({qx:.4f}, {qy:.4f}, {qz:.4f}, {qw:.4f})")
                 if len(kf.bone_rotations) > 10:
                     lines.append(f"  ... and {len(kf.bone_rotations) - 10} more")
+                lines.append("")
+
+            lines.append("Export: right-click the file in the list for \"Export as FBX\".")
+
             self._text_edit.setPlainText("\n".join(lines))
             self._stack.setCurrentIndex(IDX_TEXT)
         except Exception as e:
@@ -365,6 +469,55 @@ class PreviewPane(QWidget):
         except Exception as exc:
             return f"DDS preview unavailable: {exc}"
 
+    def _compute_preview_texture_data(self, data: bytes, path: str):
+        """Resolve textures for the mesh and return GPU-ready payload + face colours.
+
+        The OpenGL viewer consumes the ``GpuTexturePayload`` for true
+        per-pixel texturing (interpolated UVs, nearest-DDS-texel
+        sampling with mipmaps). The software viewer falls back to the
+        ``face_colors`` list because it can't do per-pixel shading at
+        interactive rates in pure Python.
+
+        Returns ``(face_colors, texture_payload)`` — either may be
+        empty / None when no diffuse textures resolved.
+        """
+        if self._active_vfs is None or not self._active_vfs_path:
+            return [], None
+
+        try:
+            from core.mesh_parser import parse_mesh
+            from core.mesh_texture_service import (
+                build_gpu_texture_payload,
+                compute_mesh_texture_report,
+            )
+
+            full_mesh = parse_mesh(data, os.path.basename(path))
+            if not full_mesh.submeshes:
+                return [], None
+
+            report = compute_mesh_texture_report(
+                self._active_vfs,
+                self._active_vfs_path,
+                full_mesh,
+            )
+            if not report.any_textured:
+                return [], None
+
+            # Per-face flat colours for the software viewer fallback.
+            face_colors: list[tuple[int, int, int, int]] = []
+            for sm, entry in zip(full_mesh.submeshes, report.submeshes):
+                if entry is None:
+                    face_colors.extend([(180, 180, 180, 255)] * len(sm.faces))
+                else:
+                    face_colors.extend(entry.face_colors)
+
+            # GPU payload — flattened positions + UVs + texture groupings.
+            payload = build_gpu_texture_payload(full_mesh, report)
+            return face_colors, payload
+        except Exception as exc:
+            logger.debug("Preview texture colouring skipped: %s", exc)
+            return [], None
+
     def _show_mesh_info(self, path: str) -> None:
         """Show an interactive 3D preview of the mesh."""
         try:
@@ -379,11 +532,31 @@ class PreviewPane(QWidget):
                     f"{preview_mesh.total_vertices:,} verts | {preview_mesh.total_faces:,} faces | "
                     f"{preview_mesh.submesh_count} submesh(es)"
                 )
+
+                # Try to colour the preview with the paired DDS texture.
+                # This only kicks in when the caller (Explorer) passed a
+                # VFS context — file-system previews stay monochrome.
+                face_colors, texture_payload = self._compute_preview_texture_data(data, path)
+                if (texture_payload is not None and not texture_payload.is_empty) or face_colors:
+                    info_text += "  |  textured"
+
+                viewer_kwargs: dict = {
+                    "info_text": info_text,
+                    "face_colors": face_colors,
+                }
+                # Older viewers (software, legacy builds) don't accept
+                # texture_payload — inspect the signature so we only pass
+                # it when supported.
+                import inspect
+                sig = inspect.signature(self._mesh_viewer.set_mesh)
+                if "texture_payload" in sig.parameters:
+                    viewer_kwargs["texture_payload"] = texture_payload
+
                 self._mesh_viewer.set_mesh(
                     preview_mesh.vertices,
                     preview_mesh.faces,
                     preview_mesh.normals,
-                    info_text=info_text,
+                    **viewer_kwargs,
                 )
                 self._info_label.setText(self._info_label.text() + f"  |  {info_text}")
                 self._stack.setCurrentIndex(IDX_MESH)
@@ -607,6 +780,24 @@ class PreviewPane(QWidget):
             self._stack.setCurrentIndex(IDX_TEXT)
         except Exception as e:
             self._show_empty(f"Cannot read file: {e}")
+
+    def _show_pabgb_table(self, path: str) -> None:
+        """Preview a .pabgb game-data table as a formatted text summary."""
+        try:
+            from core.pabgb_parser import parse_pabgb, format_table_preview
+            with open(path, "rb") as f:
+                data = f.read()
+            # Try to find matching .pabgh header alongside the temp file
+            header_data = None
+            header_path = path[:-1] + "h"  # .pabgb → .pabgh
+            if os.path.isfile(header_path):
+                with open(header_path, "rb") as f:
+                    header_data = f.read()
+            table = parse_pabgb(data, header_data, os.path.basename(path))
+            self._text_edit.setPlainText(format_table_preview(table, max_rows=200))
+            self._stack.setCurrentIndex(IDX_TEXT)
+        except Exception as e:
+            self._show_empty(f"Cannot parse game data table: {e}")
 
     def _show_hex(self, path: str) -> None:
         try:

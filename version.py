@@ -17,11 +17,142 @@ VERSION BUMPING RULES
 __all__ = ["APP_VERSION", "APP_NAME", "CHANGELOG"]
 
 APP_NAME = "CrimsonForge"
-APP_VERSION = "1.17.0"
+APP_VERSION = "1.22.2"
 
 # Each entry: (version, date, list_of_changes)
 # Newest first. `date` is YYYY-MM-DD.
 CHANGELOG: list[tuple[str, str, list[str]]] = [
+    (
+        "1.22.2", "2026-04-21", [
+            "[Fix] Tab switching no longer freezes the window on first click. Materialisation is now three-phase: the loading overlay paints first, widget construction runs on the next UI tick, and game-data init runs on a background thread.",
+            "[Fix] Qt currentChanged signal re-entrance during the tab swap is blocked, preventing duplicate materialisation.",
+            "[Fix] User's selected tab no longer jumps when a non-focused tab is swapped — currentIndex is preserved across the swap.",
+            "[Enhancement] TabInitContainer now supports lazy content installation via set_content().",
+            "[Enhancement] 531 tests passing (+7 for the lazy-install path).",
+        ],
+    ),
+    (
+        "1.22.1", "2026-04-21", [
+            "[Fix] Clicking a tab for the first time no longer locks the window for 5-30 seconds. Tab initialisation (PAMT indexing, paloc cross-reference, catalog builds) now runs in a background thread with a progress overlay.",
+            "[Feature] New loading-overlay widget — progress bar + status label + Retry button. Flips to real tab content when init finishes.",
+            "[Enhancement] Per-tab init state tracked; in-flight workers are de-duplicated; failures surface a Retry button that re-runs the same task.",
+            "[Enhancement] 524 tests passing (+15 for the overlay state machine).",
+        ],
+    ),
+    (
+        "1.22.0", "2026-04-20", [
+            "[Feature] Bone-mapping editor dialog — review and edit the auto-correlated PAA-track → PAB-bone mapping per rig. Saved per rig to %APPDATA%/CrimsonForge/bone_maps/<rig>.bonemap.json with colour-coded confidence.",
+            "[Feature] child_idle PAA variant fully decoded — 112 tracks / 4,711 keyframes recovered (was 1 track in v1.21.1). Root bone uses stride 10; child bones use stride 8 with implicit W.",
+            "[Feature] Link-variant VFS resolution verified end-to-end across primary-group, fallback-scan, and unresolvable cases.",
+            "[Feature] Disconnected placeholder mesh resolved — joint cubes and limb cylinders enlarged to overlap, combined with split-weight limbs.",
+            "[Feature] FBX → PAA writer now covers all three shipping variants (tagged, untagged, v3) with a unified dispatcher.",
+            "[Fix] v3 parser scan window and walker bailout corrected for minimal bone blocks.",
+            "[Enhancement] All five FBX-animation Known Issues tracked since v1.18.0 are now closed.",
+            "[Enhancement] 509 tests passing (+21 across parser, integration, and writer).",
+        ],
+    ),
+    (
+        "1.21.1", "2026-04-20", [
+            "[Feature] First-cut SRT-float / child_idle PAA variant parser — recovers 113 keyframes from the test sample where the v2 parser returned zero tracks.",
+            "[Feature] parse_paa() auto-routes to v3 when v2 returns zero tracks — callers get real track data without knowing which variant a file uses.",
+            "[Feature] Limb-prism vertices are now split-weighted — parent-end verts bind to the parent bone, child-end verts to the current bone. Limbs bend smoothly between joints instead of sliding past each other.",
+            "[Enhancement] 499 tests passing (+13 for v3 parser and split-weight mesh).",
+        ],
+    ),
+    (
+        "1.21.0", "2026-04-19", [
+            "[Feature] PAA → PAB bone mapping — auto-correlates from bind-pose angular distance with a JSON override saved per rig. After deep RE, confirmed that PAB bone names and common string hashes do not appear in PAA bytes; the mapping isn't in the file, so the auto-correlate seed + user override is the correct solution.",
+            "[Feature] Link-variant PAA resolver — follows embedded %character/... paths across the VFS with a loop-guard. Covers the ~19% of shipping PAAs that point at other files instead of carrying their own animation.",
+            "[Feature] parse_paa_with_resolution() — single entry point that follows link-variant references through a passed VFS.",
+            "[Feature] FBX → PAA inverse writer — round-trips via the parser with bit-exact frame indices and fp16-precision quaternions.",
+            "[Feature] export_animation_fbx() accepts a bone_map so PAA track i can drive PAB bone bone_map[i]; tracks mapped to -1 are excluded.",
+            "[Known Issue] child_idle variant and disconnected placeholder mesh remain open this release (both closed in v1.21.1 / v1.22.0).",
+            "[Enhancement] 486 tests passing (+35 across bone-mapping, link-resolver, and writer).",
+        ],
+    ),
+    (
+        "1.20.3", "2026-04-18", [
+            "[Fix] Face-Part Browser 'Open Matching Prefab' now uses a reverse-reference index instead of a basename heuristic. Real corpus showed only 1 in 6 prefabs matched their PAC by basename; the new index scans every prefab once and answers queries in O(1).",
+            "[Feature] prefab_reference_index module — case-insensitive PAC → prefab map with basename fallback and duplicate-add idempotency. When multiple prefabs point at the same PAC, the Explorer pops a selection dialog.",
+            "[Enhancement] End-to-end flow tests exercise the prefab edit, state-machine browse, and face-parts pipelines against the real temp cache.",
+            "[Enhancement] Prefab edit/patch path fuzzed — identity round-trip byte-exact, same-length edits preserve file size, length changes update size by exact delta, random 50-cycle edits always re-parse cleanly.",
+            "[Enhancement] 451 tests passing (+20 across reverse-index, E2E flows, and fuzz tests).",
+        ],
+    ),
+    (
+        "1.20.2", "2026-04-17", [
+            "[Fix] Face-Part Browser walks the VFS via the public list_package_groups + load_pamt API instead of a private cache — covers every shipping package group.",
+            "[Fix] Face-part classifier regex expanded from 3 to 9 prefixes (ptm/phm/phw/pfm/pfw/ppdm/ppdw/pgm/pgw) so eye-detail and face-template PACs are no longer dropped from the catalog.",
+            "[Feature] 'Show Sub-Parts' button reads the granular sub-parts bundled inside head_sub PACs (e.g. EyeLeft_0001, Tooth_0001, Eyebrow_0004).",
+            "[Feature] 'Open Matching Prefab' button routes through the Explorer's existing edit flow in one click.",
+            "[Enhancement] 431 tests passing (+3 real-corpus tests).",
+        ],
+    ),
+    (
+        "1.20.1", "2026-04-16", [
+            "[Feature] New Face-Part Browser — catalogs every face-part PAC across loaded archives (Head, HeadSub, Eye, Brow, Lash, Tooth, Tongue, Nose, Lip, Mouth, Beard, Mustache, Hair, Ear, Face) with variant IDs extracted from the filename.",
+            "[Feature] face_parts module — enumerated classifier with longest-prefix disambiguation, variant-ID extractor, and a granular sub-part scanner for head_sub PACs.",
+            "[Feature] Category list with part/variant counts + filterable variant table; Copy Archive Path + Export Catalog CSV.",
+            "[Feature] Explorer Quick Mods now includes 'Face-Part Browser...'.",
+            "[Enhancement] Investigation confirmed the game's face-customisation paradigm is submesh swapping (enumerated variant PACs), not blendshapes or dedicated facial bones.",
+            "[Enhancement] 428 tests passing (+14 face-part tests).",
+        ],
+    ),
+    (
+        "1.20.0", "2026-04-15", [
+            "[Feature] New State-Machine Browser — cross-references every condition expression across 9 state-relevant pabgb tables and surfaces the underlying state tokens (ActionAttributes, Missions, Stages, CharacterKeys, Macros, Levels, Gimmicks).",
+            "[Feature] state_machine module — byte-level tokeniser for the condition-expression grammar (FCALL allowlist, argument-identifier extraction, bare-identifier enum pass).",
+            "[Feature] Token list sorted by occurrence frequency with category filter, text search, and min-occurrences threshold; CSV export per token.",
+            "[Feature] Explorer Quick Mods now includes 'State-Machine Browser...'.",
+            "[Feature] Known-enum catalogues exposed (ActionAttributes, CharacterKeys, MacroStates).",
+            "[WIP] Face-morph investigation deferred. Hex-dumped head / eye / beard PACs: every 'shape' hit is Havok physics, not vertex deltas. The feature is bone-driven (facial rig bones + a per-character appearance blob) — scanner + blob parser tracked for a future release.",
+            "[Enhancement] 414 tests passing (+14 state-machine tests).",
+        ],
+    ),
+    (
+        "1.19.1", "2026-04-14", [
+            "[Fix] Prefab editor no longer crashes on open — replaced the QTableView call that only exists on QTreeView with the correct performance pattern (fixed header section-size-mode + per-pixel scroll mode).",
+            "[Fix] Verified headless against a 76-row cloak prefab; 400 regression tests still pass.",
+        ],
+    ),
+    (
+        "1.19.0", "2026-04-14", [
+            "[Feature] New .prefab editor — byte-level reverse-engineered parser for Pearl Abyss prefab assets (magic header + two 32-bit hashes, then a linear stream of length-prefixed UTF-8 strings classified by role).",
+            "[Feature] Editor dialog with category filter, text search, live edit preview with length delta, per-string byte context, revert / save-as / patch-to-game.",
+            "[Feature] Safe-mode 'Same-length edits only' (default ON) preserves binary layout; toggle off for length-changing edits with automatic length-prefix updates.",
+            "[Feature] Five string categories colour-coded: File References, Tag/Enum Values, Property Names (read-only), Type Names (read-only), Other.",
+            "[Feature] Tag values are paired with the nearest preceding tag-typed property (e.g. '_shrinkTag = Cloak') for clearer context.",
+            "[Feature] Right-click .prefab in Explorer → 'Edit Prefab'. Patch-to-Game writes through the repack pipeline with automatic backup.",
+            "[Feature] apply_edits() supports atomic multi-string rewrite with length deltas accumulated in order.",
+            "[Enhancement] PAA link-variant detection scans offsets 0x14..0x100 for the '%' marker with prefix validation, exposing the detected offset to downstream consumers.",
+            "[Enhancement] PAA bind-pose walker gains an offset+0/+4 probe for flag variants that insert a 4-byte hash before the first SRT record.",
+            "[Enhancement] 400 tests passing (+16 prefab tests).",
+        ],
+    ),
+    (
+        "1.18.0", "2026-04-12", [
+            "[Feature] New .pabgb / .pabgh game-data table editor — handles both the simple (5-byte entries) and hashed (8-byte entries) flavours discovered via byte-level inspection.",
+            "[Feature] Editor dialog with searchable row list, filterable field table with auto-labels and colour coding, hex-dump pane with per-field highlighting, row comparison, duplicate/delete row, and patch-to-game.",
+            "[Feature] .pabgb files now open in the editor automatically — previously only showed a hex preview, which blocked edits to iteminfo / stageinfo / conditioninfo / gimmickgroupinfo.",
+            "[WIP] PAA → FBX animation export is under active reverse engineering in this release and is NOT production-ready. Use OBJ export for reliable mesh-only round-trips. Full working FBX animation export is tracked for a future release.",
+            "[Enhancement] PAA 10-byte keyframe record format documented: [W:fp16][frame:uint16][xyz:3×fp16] per keyframe, sparse frame indices, per-bone implicit-W bind at the top of each block.",
+            "[Enhancement] PAA bone-block separator reversed: '3c 00 3c 00 3c' + uint32 count + 6-byte bind + N × 10-byte records. Parser validates each record against |q|² ∈ [0.90, 1.10].",
+            "[Enhancement] FBX export composes bind with PAA rotation (fbx_local_rot(t) = PAB_bind × PAA_rot(t)) so bind-pose angles match the expected values.",
+            "[Enhancement] FBX export emits a skinned humanoid placeholder mesh so Blender's Armature modifier attaches on import.",
+            "[Fix] PAB skeleton parser no longer emits phantom bones past the real count — phm_01.pab returns 56 real bones instead of 178 garbage-trailed ones that crashed Blender's FBX importer.",
+            "[Fix] FBX bone positions multiplied by 100 (cm→m) so Blender doesn't collapse the skeleton into a sub-centimetre cluster at origin.",
+            "[Fix] FBX bone count clamped to the PAB skeleton size — extra PAA tracks no longer emit origin-placed placeholder bones.",
+            "[Known Issue] PAA tracks do not map 1:1 to PAB bone names — explicit mapping table not yet decoded. (Resolved in v1.21.0.)",
+            "[Known Issue] child_idle / SRT-float variant decodes to zero tracks. (Resolved in v1.21.1 / v1.22.0.)",
+            "[Known Issue] Link-variant PAAs (~19% of shipping corpus) not followed through the VFS. (Resolved in v1.21.0.)",
+            "[Known Issue] Placeholder mesh is disconnected cubes + prisms. (Resolved in v1.21.1 / v1.22.0.)",
+            "[Known Issue] FBX → PAA reimport not implemented. (Resolved in v1.21.0.)",
+            "[Fix] PyInstaller bundle now includes numpy.",
+            "[Fix] UPX compression disabled in PyInstaller spec — was corrupting the splash PNG on Windows 11.",
+            "[Fix] Splash screen version text position corrected so the version string lands inside the brand banner.",
+            "[Enhancement] 384 tests passing (+8 across PAA parser, placeholder mesh, bone-count clamp, and scale).",
+        ],
+    ),
     (
         "1.17.0", "2026-04-11", [
             "[Performance] Tabs are now lazily instantiated — only constructed when first clicked, cutting app startup time dramatically",
@@ -476,6 +607,13 @@ def get_changelog_html() -> str:
         "Deprecated": "#fab387",
         "Removed": "#eba0ac",
         "Performance": "#94e2d5",
+        # Work-in-progress + known-issue tags — call out partial
+        # features and unresolved gaps directly in the changelog so
+        # users don't assume a feature is production-ready when it
+        # still has known blockers.
+        "WIP": "#fab387",
+        "Known Issue": "#f38ba8",
+        "Community": "#94e2d5",
     }
 
     html_parts = []
