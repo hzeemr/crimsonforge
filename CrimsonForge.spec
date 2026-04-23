@@ -58,10 +58,22 @@ a = Analysis(
     datas=DATA_FILES,
     hiddenimports=[
         'core._pa_checksum',
-        # AI providers
+        # AI providers — every provider module referenced by
+        # ai.provider_registry so PyInstaller's analyser can't
+        # drop any of them. Missing one here causes the app to
+        # show "SDK not installed" at runtime even though the
+        # SDK is installed in the venv.
+        'ai.provider_openai',
         'ai.provider_openai_compat',
         'ai.provider_anthropic',
         'ai.provider_gemini',
+        'ai.provider_deepseek',
+        'ai.provider_ollama',
+        'ai.provider_vllm',
+        'ai.provider_mistral',
+        'ai.provider_cohere',
+        'ai.provider_custom',
+        'ai.provider_deepl',
         'ai.translation_engine',
         'ai.pricing_registry',
         # Core

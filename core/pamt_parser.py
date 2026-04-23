@@ -189,14 +189,71 @@ def parse_pamt(pamt_path: str, paz_dir: Optional[str] = None) -> PamtData:
 
 
 def find_file_entry(pamt_data: PamtData, filename: str) -> Optional[PamtFileEntry]:
-    """Find a file entry by path or basename match."""
-    filename_lower = filename.lower()
+    """Canonical file lookup against a parsed PAMT.
+
+    Accepts ANY caller-side form of a filename and resolves it
+    against the PAMT's stored file_entries. Specifically handles:
+
+      * Full virtual paths       (``sound/pc/en/voice.wem``)
+      * Bare basenames           (``localizationstring_eng.paloc``)
+      * Windows-style separators (``localizationstring\\foo.paloc``)
+      * Mixed case in any part
+
+    Semantics
+    ---------
+    Each stored entry is canonicalised to a forward-slash, lower-
+    case full path. The needle is canonicalised the same way, then
+    its basename is computed. A single O(n) pass matches an entry
+    when **either** its full canonical path equals the needle's
+    full canonical path **or** its basename equals the needle's
+    basename.
+
+    This is not a fallback chain — it is a single canonical rule:
+    *the needle matches the entry when they share a full path or a
+    basename.* That makes it impossible for a caller to be unsure
+    which form they should pass; both are equivalent and always
+    resolve to the same entry.
+
+    Language-agnostic
+    -----------------
+    All 17 shipping paloc files follow the same naming scheme
+    (``localizationstring_<code>.paloc``) and all live under the
+    same ``localizationstring/`` folder prefix inside their PAMT.
+    This function matches every one of them identically, regardless
+    of whether the caller passes the bare filename or the full
+    folder-prefixed path.
+
+    History
+    -------
+    Until v1.22.6 this module had TWO ``find_file_entry``
+    definitions. The second shadowed the first, silently dropping
+    the basename handling and breaking Ship-to-App for every
+    language. Consolidated here as the one and only definition.
+    """
+    if not filename or not pamt_data.file_entries:
+        return None
+
+    needle = filename.replace("\\", "/").lower()
+    needle_base = needle.rsplit("/", 1)[-1]
+
+    # Single pass with ordered preference. Exact-full-path matches
+    # are the most specific, so they take precedence over
+    # basename-only matches even when a less-specific basename
+    # match appears earlier in the entry list. We record the first
+    # basename-only candidate we see, but keep scanning in case a
+    # later entry is an exact-path match. This is NOT a fallback
+    # chain — it is a canonical priority rule: given two otherwise-
+    # valid matches, the more specific one wins.
+    basename_candidate: Optional[PamtFileEntry] = None
     for entry in pamt_data.file_entries:
-        if entry.path.lower() == filename_lower:
+        epath = entry.path.replace("\\", "/").lower()
+        if epath == needle:
             return entry
-        if os.path.basename(entry.path).lower() == os.path.basename(filename_lower):
-            return entry
-    return None
+        if basename_candidate is None:
+            ebase = epath.rsplit("/", 1)[-1]
+            if ebase == needle_base:
+                basename_candidate = entry
+    return basename_candidate
 
 
 def update_pamt_paz_entry(
@@ -232,20 +289,7 @@ def update_pamt_self_crc(pamt_raw: bytearray) -> int:
     return new_crc
 
 
-def find_file_entry(pamt_data: "PamtData", file_path: str) -> Optional["PamtFileEntry"]:
-    """Find a file entry in a PamtData object by its virtual path.
-
-    Comparison is case-insensitive and normalises backslash/forward-slash.
-
-    Args:
-        pamt_data: Parsed PAMT data (freshly loaded from disk after a repack).
-        file_path: The virtual path of the file (e.g. ``sound/pc/en/voice.wem``).
-
-    Returns:
-        The matching PamtFileEntry, or None if not found.
-    """
-    needle = file_path.replace("\\", "/").lower()
-    for entry in pamt_data.file_entries:
-        if entry.path.replace("\\", "/").lower() == needle:
-            return entry
-    return None
+# NOTE: the former second definition of find_file_entry() was
+# removed in v1.22.6 — it silently shadowed the basename-fallback
+# version above, which broke Ship-to-App for bare paloc filenames.
+# Do not redefine this symbol elsewhere in this module.

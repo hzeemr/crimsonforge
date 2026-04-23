@@ -17,11 +17,19 @@ VERSION BUMPING RULES
 __all__ = ["APP_VERSION", "APP_NAME", "CHANGELOG"]
 
 APP_NAME = "CrimsonForge"
-APP_VERSION = "1.22.5"
+APP_VERSION = "1.22.6"
 
 # Each entry: (version, date, list_of_changes)
 # Newest first. `date` is YYYY-MM-DD.
 CHANGELOG: list[tuple[str, str, list[str]]] = [
+    (
+        "1.22.6", "2026-04-22", [
+            "[Fix] Ship-to-App no longer fails with \"'localizationstring_*.paloc' not in PAMT\" for ANY language. Root cause: core/pamt_parser.py had TWO `find_file_entry` definitions; the later one silently shadowed the earlier, dropping the basename-fallback that every Ship-to-App caller relies on. Consolidated into a single canonical lookup that handles full paths, bare basenames, Windows slashes, and mixed case in one O(n) pass. Works identically for every one of the 17 shipping languages (eng / kor / jpn / rus / tur / spa-es / spa-mx / fre / ger / ita / pol / por-br / zho-tw / zho-cn / tha / vie / ara).",
+            "[Fix] DeepL translation no longer fails with \"DeepL SDK not installed, run: pip install deepl\" in the shipped exe. The deepl package wasn't in requirements.txt so it was never bundled by PyInstaller. Added deepl>=1.17.0 to requirements.txt and 'ai.provider_deepl' (plus every other provider module) to the spec's hiddenimports to guarantee all 11 providers ship with every future exe build.",
+            "[Enhancement] 21 new regression tests in tests/test_find_file_entry.py pin down the canonical lookup contract: every shipping language's paloc resolves from its bare basename, full path, Windows slashes, and mixed case forms; a module-level guard asserts there is EXACTLY ONE `find_file_entry` definition so the shadowing bug cannot reappear.",
+            "[Enhancement] Full test suite now 410 tests + 136 subtests = 546 scenarios passing (was 508 in v1.22.5).",
+        ],
+    ),
     (
         "1.22.5", "2026-04-22", [
             "[Fix] pa_checksum no longer triggers false-positive virus flags from Windows Defender / some third-party AVs. The previous MinGW-compiled ctypes DLL (core/pa_checksum.dll) matched heuristic patterns AVs associate with malware loaders. Switched to a MSVC-compiled Python C extension (core/_pa_checksum.cp*-win_amd64.pyd) loaded via Python's own import machinery, which inherits Python's AV trust path. No observable performance difference — same Bob Jenkins Lookup3 C core, cross-verified bit-for-bit against the old DLL's output.",
