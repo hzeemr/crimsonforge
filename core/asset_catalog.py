@@ -422,7 +422,12 @@ def _load_prefab_record(
 
     prefabdata_path = ""
     support_refs: list[str] = []
-    prefabdata_entry = entry_map.get(f"character/{key}.prefabdata.xml")
+    # April-2026 patch renamed .prefabdata.xml → .prefabdata_xml.
+    # Look up the new name first; fall back to the old for legacy installs.
+    prefabdata_entry = (
+        entry_map.get(f"character/{key}.prefabdata_xml")
+        or entry_map.get(f"character/{key}.prefabdata.xml")
+    )
     if prefabdata_entry is not None:
         prefabdata_path = prefabdata_entry.path.replace("\\", "/")
         xml_text = _decode_xml(vfs.read_entry_data(prefabdata_entry))
@@ -1023,10 +1028,14 @@ def build_character_catalog_from_vfs(worker, vfs: VfsManager) -> CharacterCatalo
     for entry in character_entries:
         basename_map[_basename_lower(entry.path)].append(entry.path.replace("\\", "/"))
 
+    # April-2026 game patch: .app.xml renamed to .app_xml (and likewise
+    # .pac.xml → .pac_xml, .prefabdata.xml → .prefabdata_xml). Accept
+    # both so the character catalog works on both pre-patch and
+    # post-patch installs.
     app_entries = [
         entry
         for entry in character_entries
-        if entry.path.lower().endswith(".app.xml")
+        if entry.path.lower().endswith((".app.xml", ".app_xml"))
     ]
     total = max(len(app_entries), 1)
     prefab_cache: dict[str, _PrefabRecord | None] = {}

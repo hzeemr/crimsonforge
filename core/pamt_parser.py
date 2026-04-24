@@ -53,10 +53,27 @@ class PamtFileEntry:
     @property
     def encrypted(self) -> bool:
         """Files with certain extensions are ChaCha20-encrypted.
-        The game encrypts paloc, xml, css, html, thtml, and pami files."""
+
+        The game's April-2026 patch renamed several dotted-compound
+        extensions to underscore form — ``.app.xml`` → ``.app_xml``,
+        ``.pac.xml`` → ``.pac_xml``, ``.prefabdata.xml`` →
+        ``.prefabdata_xml``. These new extensions carry the same
+        ChaCha20 encryption as the old ``.xml`` family, but
+        ``os.path.splitext`` only sees the underscore form as a
+        distinct extension so they were silently treated as
+        unencrypted and handed back to callers as raw ciphertext.
+
+        We include BOTH the old and the new names so re-packaging
+        unpatched game installs still works.
+        """
         ext = os.path.splitext(self.path.lower())[1]
-        return ext in (".xml", ".paloc", ".css", ".html", ".thtml", ".pami",
-                       ".uianiminit", ".spline2d", ".spline", ".mi", ".txt")
+        return ext in (
+            # Base text / data formats.
+            ".xml", ".paloc", ".css", ".html", ".thtml", ".pami",
+            ".uianiminit", ".spline2d", ".spline", ".mi", ".txt",
+            # April-2026 renames (encrypted, same ChaCha20 key scheme).
+            ".app_xml", ".pac_xml", ".prefabdata_xml",
+        )
 
 
 @dataclass

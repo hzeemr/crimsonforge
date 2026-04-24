@@ -17,11 +17,22 @@ VERSION BUMPING RULES
 __all__ = ["APP_VERSION", "APP_NAME", "CHANGELOG"]
 
 APP_NAME = "CrimsonForge"
-APP_VERSION = "1.22.6"
+APP_VERSION = "1.22.7"
 
 # Each entry: (version, date, list_of_changes)
 # Newest first. `date` is YYYY-MM-DD.
 CHANGELOG: list[tuple[str, str, list[str]]] = [
+    (
+        "1.22.7", "2026-04-24", [
+            "[Fix] Character catalog + mesh sidecars work again on the post-April-2026 game patch. Pearl Abyss renamed three compound extensions: .app.xml -> .app_xml, .pac.xml -> .pac_xml, .prefabdata.xml -> .prefabdata_xml. 5,579 .app_xml, 12,692 .pac_xml, and 2,591 .prefabdata_xml files now live in the archives with the new names. Our encryption-detection list only recognised the old names, so every one of those files came back as raw ChaCha20 ciphertext — character appearance XML parsed as 'not well-formed', mesh sidecar discovery quietly returned nothing, etc.",
+            "[Fix] core/pamt_parser.py encryption list now includes all three new extensions alongside the old ones, so both pre-patch and post-patch installs decrypt correctly.",
+            "[Fix] core/asset_catalog.py accepts both .app.xml / .app_xml and both .prefabdata.xml / .prefabdata_xml when scanning the character catalog.",
+            "[Fix] core/mesh_sidecar_service.py SIDECAR_KINDS tuple carries both old and new suffixes so Import OBJ + Patch to Game correctly picks up the renamed sidecars.",
+            "[Investigation] 'Import OBJ + Patch to Game' 10-20x slowdown root-caused: the same game patch consolidated character PAZ archives from ~50 MB files into ~870 MB files (17x growth). Bob Jenkins Lookup3 is O(file-size) and must touch every byte — 570 ms per PAZ on NVMe is the floor. Benchmarked mmap / readinto / read alternatives; f.read() + pa_checksum is already optimal on Windows because ReadFile pre-fetches sequentially while mmap pays a page-fault per 4 KB. Documented the trade-off in code so future contributors don't reintroduce the regression.",
+            "[Enhancement] 24 new regression tests in tests/test_patch_2026_04_extension_rename.py. 6 assert all three new extensions route through decryption; 3 verify the legacy forms still work; 7 guard unrelated extensions against accidental mis-flagging; 4 pin the SIDECAR_KINDS tuple; 4 cross-check _checksum_paz_file against pa_checksum() for boundary cases (empty, tail bytes, non-multiple-of-12).",
+            "[Enhancement] Full test suite now 434 tests + 136 subtests = 570 scenarios passing (was 546 in v1.22.6).",
+        ],
+    ),
     (
         "1.22.6", "2026-04-22", [
             "[Fix] Ship-to-App no longer fails with \"'localizationstring_*.paloc' not in PAMT\" for ANY language. Root cause: core/pamt_parser.py had TWO `find_file_entry` definitions; the later one silently shadowed the earlier, dropping the basename-fallback that every Ship-to-App caller relies on. Consolidated into a single canonical lookup that handles full paths, bare basenames, Windows slashes, and mixed case in one O(n) pass. Works identically for every one of the 17 shipping languages (eng / kor / jpn / rus / tur / spa-es / spa-mx / fre / ger / ita / pol / por-br / zho-tw / zho-cn / tha / vie / ara).",

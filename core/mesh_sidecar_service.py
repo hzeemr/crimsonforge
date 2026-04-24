@@ -59,12 +59,26 @@ logger = get_logger("core.mesh_sidecar_service")
 
 # Ordered from "most disruptive when stale" to "least". The UI uses this
 # order when surfacing a warning so the worst desync is shown first.
+#
+# April-2026 game patch renamed compound .foo.xml suffixes to .foo_xml:
+#   .app.xml         → .app_xml
+#   .pac.xml         → .pac_xml
+#   .prefabdata.xml  → .prefabdata_xml
+# We include BOTH so the same code path works on pre-patch and
+# post-patch installs. Order within each kind doesn't matter — the
+# discovery loop checks each candidate against the VFS and uses the
+# one that exists.
 SIDECAR_KINDS: tuple[tuple[str, str, str], ...] = (
-    # (suffix,               kind,          human description)
-    (".hkx",                 "physics",     "Havok physics (collision, cloth, ragdoll)"),
-    (".wrinkle.xml",         "wrinkle",     "Facial wrinkle / micro-physics data"),
-    (".prefabdata.xml",      "prefab_data", "Supplementary prefab metadata"),
-    (".xml",                 "prefab",      "Prefab data / attachment points / bone binds"),
+    # (suffix,                 kind,          human description)
+    (".hkx",                   "physics",     "Havok physics (collision, cloth, ragdoll)"),
+    (".wrinkle.xml",           "wrinkle",     "Facial wrinkle / micro-physics data"),
+    (".prefabdata_xml",        "prefab_data", "Supplementary prefab metadata (post-patch)"),
+    (".prefabdata.xml",        "prefab_data", "Supplementary prefab metadata"),
+    (".pac_xml",               "prefab",      "Prefab data (post-patch .pac_xml)"),
+    (".pac.xml",               "prefab",      "Prefab data (legacy .pac.xml)"),
+    (".app_xml",               "appearance",  "Appearance XML (post-patch .app_xml)"),
+    (".app.xml",               "appearance",  "Appearance XML (legacy .app.xml)"),
+    (".xml",                   "prefab",      "Prefab data / attachment points / bone binds"),
 )
 
 
