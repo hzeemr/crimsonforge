@@ -53,12 +53,23 @@ def _resolve_obj_index(raw_index: str, item_count: int) -> int:
 def _load_cfmeta_sidecar(obj_path: str) -> dict | None:
     """Read the ``<obj>.cfmeta.json`` sidecar if present.
 
-    The sidecar lives next to the OBJ and records skin weights +
-    vertex counts per submesh so a round-trip through Blender can
-    still rebuild PAC skin data correctly. Returns None when the
-    sidecar is missing or malformed — callers must tolerate that
-    case, because Blender users may edit the OBJ in a path that
-    loses the sidecar.
+    The sidecar lives next to the OBJ/FBX and records skin weights +
+    per-vertex source-PAC mapping. Returns None when the sidecar is
+    missing or malformed — callers must tolerate that case, because
+    Blender users may edit the OBJ in a path that loses the sidecar.
+
+    Supported schema versions:
+      v1 — original. Per-submesh: name, vertex_count, bone_indices,
+           bone_weights. No source_vertex_map (identity assumed by
+           import path), no filtered_vertices.
+      v2 — adds source_vertex_map (each FBX vertex's original PAC
+           slot) and filtered_vertices (spike donor records preserved
+           verbatim across the round-trip). v2 is what FBX exports
+           with skin write — see ``_write_cfmeta_sidecar_v2`` in
+           mesh_exporter for schema details.
+
+    Both versions are returned as-is; callers branch on
+    ``data.get('schema_version')`` to consume new fields.
     """
     import json
     sidecar_path = obj_path + ".cfmeta.json"
@@ -70,10 +81,14 @@ def _load_cfmeta_sidecar(obj_path: str) -> dict | None:
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("Failed to read cfmeta sidecar %s: %s", sidecar_path, e)
         return None
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict):
+        logger.warning("cfmeta sidecar %s has invalid root type", sidecar_path)
+        return None
+    schema = data.get("schema_version")
+    if schema not in (1, 2):
         logger.warning(
             "cfmeta sidecar %s has unsupported schema_version %s",
-            sidecar_path, data.get("schema_version") if isinstance(data, dict) else "n/a",
+            sidecar_path, schema,
         )
         return None
     return data
@@ -732,6 +747,48 @@ def import_fbx(fbx_path: str) -> ParsedMesh:
     source_path = sidecar.get('source_path', '') if sidecar else ''
     source_format = sidecar.get('source_format', '') if sidecar else ''
 
+    # Build a lookup of per-submesh sidecar records keyed by name. We'll
+    # use this during the import loop both for v1 (bone_indices/weights)
+    # and v2 (source_vertex_map + filtered_vertices/faces) consumption.
+    sidecar_by_name: dict[str, dict] = {}
+    if sidecar is not None:
+        for sm_json in sidecar.get("submeshes", []) or []:
+            name = sm_json.get("name", "") or ""
+            if name:
+                sidecar_by_name[name] = sm_json
+
+    # Determine axis convention of the FBX so we can convert vertices /
+    # normals back to Pearl Abyss native Y-up if the file is Z-up.
+    # CrimsonForge's exporter writes UpAxis=2 (Z-up) after pre-converting
+    # all geometry to Z-up via the +90° X rotation. To round-trip
+    # correctly we apply the INVERSE rotation here.
+    #   Z-up (x, y, z) → Y-up (x, z, -y)    (rotate -90° around X)
+    fbx_up_axis = 1   # default: Y-up
+    fbx_global = _fbx_find(nodes, 'GlobalSettings')
+    if fbx_global is not None:
+        for p70 in _fbx_find_all(fbx_global['children'], 'Properties70'):
+            for p in _fbx_find_all(p70['children'], 'P'):
+                if (p['props'] and len(p['props']) >= 5
+                        and p['props'][0] == 'UpAxis'
+                        and isinstance(p['props'][4], int)):
+                    fbx_up_axis = p['props'][4]
+                    break
+            if fbx_up_axis != 1:
+                break
+
+    needs_zup_to_yup = (fbx_up_axis == 2)
+    if needs_zup_to_yup:
+        logger.info(
+            "FBX %s declares Z-up (UpAxis=2); converting vertices/normals "
+            "back to Y-up for PAC native convention", fbx_path,
+        )
+
+    def _conv_vec(v):
+        # Z-up (x, y, z) → Y-up (x, z, -y).  No-op if FBX is Y-up.
+        if needs_zup_to_yup:
+            return (v[0], v[2], -v[1])
+        return tuple(v)
+
     submeshes: list[SubMesh] = []
 
     for mod_id in model_order:
@@ -747,7 +804,8 @@ def import_fbx(fbx_path: str) -> ParsedMesh:
             continue
         vf = vn['props'][0]
         base_verts: list[tuple[float, float, float]] = [
-            (vf[i], vf[i + 1], vf[i + 2]) for i in range(0, len(vf) - 2, 3)
+            _conv_vec((vf[i], vf[i + 1], vf[i + 2]))
+            for i in range(0, len(vf) - 2, 3)
         ]
 
         # Apply the Model's local TRS so that object-level transforms made in
@@ -826,7 +884,8 @@ def import_fbx(fbx_path: str) -> ParsedMesh:
             else:
                 slot = vi
             base = slot * 3
-            return (normals_flat[base], normals_flat[base + 1], normals_flat[base + 2])
+            n = (normals_flat[base], normals_flat[base + 1], normals_flat[base + 2])
+            return _conv_vec(n)
 
         # Bone weights from FBX Cluster nodes.
         skin_weights = _geo_skin_weights(geo_id)   # vi → [(bidx, w)]
@@ -884,6 +943,101 @@ def import_fbx(fbx_path: str) -> ParsedMesh:
                 poly_vi += 1
             for i in range(1, len(corners) - 1):
                 local_faces.append((corners[0], corners[i], corners[i + 1]))
+
+        # ── v2 SIDECAR EXPANSION ──
+        # If the sidecar is schema v2, it carries:
+        #   - source_vertex_map[i] = the ORIGINAL PAC vertex slot for FBX
+        #     vertex i (the slot before spike-filtering at export).
+        #     UV-seam clones inherit this via src_map[parent].
+        #   - filtered_vertices = donor records for spike verts that
+        #     were removed from the FBX. Each has source_index +
+        #     position [+ uv + normal + bone_indices/weights].
+        #   - filtered_faces = original-index triangles that were
+        #     dropped because they touched a spike vertex.
+        #
+        # We expand the visible mesh by:
+        #   1. Remapping src_map values from FBX-index → original-PAC-slot
+        #      (this makes build_pac's donor lookup hit the right slot)
+        #   2. Appending each filtered_vertex as a new vertex with no
+        #      face references (or with restored face references)
+        #   3. Adding filtered_faces back, remapped to the new index
+        #      space (visible verts + appended filtered verts)
+        # The result: an imported mesh whose vertex count matches the
+        # ORIGINAL PAC, even though the FBX user never saw the spike
+        # geometry.
+        sm_sidecar = sidecar_by_name.get(sm_name) if sidecar_by_name else None
+        if sm_sidecar and isinstance(sm_sidecar, dict):
+            v2_map = sm_sidecar.get("source_vertex_map")
+            v2_filtered_verts = sm_sidecar.get("filtered_vertices") or []
+            v2_filtered_faces = sm_sidecar.get("filtered_faces") or []
+
+            if v2_map and isinstance(v2_map, list):
+                # Remap FBX-index → original-PAC-slot for the verts that
+                # CAME FROM the FBX. UV-seam clones already share src_map
+                # with their parent (via _resolve), so re-applying the
+                # mapping by current src_map value is correct.
+                fbx_to_orig = list(v2_map)
+                # src_map currently holds FBX-vertex indices. Replace
+                # each with the corresponding original-PAC slot.
+                for vi in range(len(src_map)):
+                    fbx_idx = src_map[vi]
+                    if 0 <= fbx_idx < len(fbx_to_orig):
+                        src_map[vi] = int(fbx_to_orig[fbx_idx])
+
+            if v2_filtered_verts:
+                # orig_to_new map: original PAC slot → index in expanded mesh.
+                # First populate with visible verts (their src_map values
+                # are now PAC slots after the remap above).
+                orig_to_new: dict[int, int] = {}
+                for new_idx, pac_slot in enumerate(src_map):
+                    # First-write wins (UV-seam clones share PAC slot
+                    # with parent — keep parent's new_idx for face
+                    # remapping continuity).
+                    orig_to_new.setdefault(int(pac_slot), new_idx)
+
+                # Append filtered verts at end of mesh.
+                appended = 0
+                for entry in v2_filtered_verts:
+                    if not isinstance(entry, dict):
+                        continue
+                    src_idx = entry.get("source_index")
+                    pos = entry.get("position")
+                    if src_idx is None or not isinstance(pos, (list, tuple)) or len(pos) != 3:
+                        continue
+                    new_idx = len(local_verts)
+                    local_verts.append(tuple(float(v) for v in pos))
+                    uv = entry.get("uv") or [0.0, 0.0]
+                    local_uvs.append(tuple(float(v) for v in uv))
+                    norm = entry.get("normal") or [0.0, 1.0, 0.0]
+                    local_norms.append(tuple(float(v) for v in norm))
+                    bi = entry.get("bone_indices") or []
+                    bw = entry.get("bone_weights") or []
+                    bone_indices_out.append(tuple(int(b) for b in bi))
+                    bone_weights_out.append(tuple(float(w) for w in bw))
+                    src_map.append(int(src_idx))
+                    orig_to_new[int(src_idx)] = new_idx
+                    appended += 1
+
+                # Re-add filtered faces, remapping ORIGINAL indices to
+                # the new expanded-mesh indices.
+                restored_faces = 0
+                for face in v2_filtered_faces:
+                    if not isinstance(face, (list, tuple)) or len(face) != 3:
+                        continue
+                    try:
+                        a = orig_to_new[int(face[0])]
+                        b = orig_to_new[int(face[1])]
+                        c = orig_to_new[int(face[2])]
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    local_faces.append((a, b, c))
+                    restored_faces += 1
+
+                logger.info(
+                    "FBX %s submesh %s: expanded with %d filtered verts "
+                    "+ %d filtered faces from sidecar v2",
+                    fbx_path, sm_name, appended, restored_faces,
+                )
 
         sm = SubMesh(
             name=sm_name,

@@ -58,7 +58,10 @@ import struct
 from pathlib import Path
 
 from core.animation_parser import ParsedAnimation
-from core.mesh_exporter import _FbxId, _fbx_node  # reuse the 7.4 binary writer
+from core.mesh_exporter import (
+    _FbxId, _fbx_node,
+    _yup_to_zup_vec3, _yup_to_zup_quat, _yup_to_zup_mat4,
+)
 from core.skeleton_parser import Skeleton
 from utils.logger import get_logger
 
@@ -67,28 +70,44 @@ logger = get_logger("core.animation_fbx_exporter")
 
 KTIME_TICKS_PER_SECOND = 46_186_158_000
 
-# FBX default UnitScaleFactor=1.0 means "1 unit = 1 centimetre". Pearl
-# Abyss stores bone positions in metres, so we scale up by 100 so that
-# Blender / Maya / 3ds Max (which all scale cm -> scene units on import)
-# recover the correct human-scale skeleton rather than a ~1 cm cluster
-# collapsed at the origin.
-POSITION_SCALE = 100.0
-
-# Radius of the placeholder cube emitted at each bone (in centimetres,
-# matching the post-POSITION_SCALE coordinate system).
+# Coordinate convention
+# ----------------------
+# This exporter writes the FBX in **Blender Z-up** with
+# ``UnitScaleFactor=100`` (1 file unit = 1 metre).  Every input from
+# the parsed PAB / PAA — bone bind matrices, bone TRS, per-frame
+# quaternions, vertex positions — is pre-converted from Pearl Abyss's
+# native Y-up to Z-up via ``_yup_to_zup_*`` helpers from mesh_exporter.
 #
-# v1.21.0 used 2.5 cm (small joint markers with visible gaps between
-# adjacent cubes + prisms). v1.22.0 enlarges to 3.5 cm so the joint
-# cubes OVERLAP the limb prism ends — combined with the split-weight
-# limb (v1.21.1) the eye reads a continuous surface instead of a
-# string of disconnected cubes. This is the practical resolution of
-# Known Issue #4 from the v1.18.0 FBX-animation audit.
-PLACEHOLDER_VERTEX_RADIUS = 3.5
+# This matches what ``export_fbx_with_skeleton`` does for skinned
+# meshes; using the same convention everywhere lets a single FBX carry
+# both mesh+skin AND armature+animation without coordinate-system
+# mixing between channels (the bug we chased through five iterations
+# of mesh export — bones in Z-up, cluster TLs in Y-up, etc.).
 
-# Radius of the limb cylinder emitted between a child bone and its
-# parent. Matched to the joint cube so limbs "seat" inside the
-# cube volume, eliminating the visible gap at joints.
-PLACEHOLDER_LIMB_RADIUS = 3.0
+# Position scale: file is in METRES (UnitScaleFactor=100 declares cm).
+# So 1.0 in our coordinate space = 1.0 metre = 100 cm to the importer.
+# Bone positions stay 1:1, no extra scaling needed.
+POSITION_SCALE = 1.0
+
+# Visual cube radius for the placeholder mesh joints. Originally 3.5
+# (centimetres, when POSITION_SCALE was 100). Now expressed in METRES
+# to match the new coordinate scale: 3.5 cm = 0.035 m. If you forget
+# to scale this when changing POSITION_SCALE, every joint cube gets
+# rendered hundreds of times bigger than the bone spacing — the entire
+# armature collapses into a giant overlapping blob shape that looks
+# like an asteroid.
+
+# Radius of the placeholder cube emitted at each bone — METRES.
+# Bone-to-bone spacing in a human rig is typically 5-30cm (0.05-0.3m),
+# so the joint cube radius needs to be < 5cm = 0.05m to avoid
+# overlapping. 3.5cm = 0.035m matches the old visual-design intent
+# while staying anatomically sensible at the new metre scale.
+PLACEHOLDER_VERTEX_RADIUS = 0.035
+
+# Radius of the limb prism connecting child bone to parent — METRES.
+# Slightly thinner than the joint cube so limbs visually "seat"
+# inside the cube volume. 3.0cm = 0.03m.
+PLACEHOLDER_LIMB_RADIUS = 0.030
 
 
 def _make_unit_cube_verts(radius: float) -> list[tuple[float, float, float]]:
@@ -119,16 +138,19 @@ _CUBE_TRIS = (
 
 
 def _bone_world_position(bone, position_scale: float) -> tuple[float, float, float] | None:
-    """Return the world-space bind translation of a bone.
+    """Return the world-space bind translation of a bone in Z-UP coords.
 
-    PAB stores ``bind_matrix`` as a row-major 4x4 with the translation
-    in row 3 (indices 12, 13, 14). When the bind matrix is missing or
-    degenerate, returns ``None`` so callers can skip the bone.
+    PAB stores ``bind_matrix`` as column-major 4x4 with the translation
+    column at indices 12, 13, 14 in Y-up coords. We axis-convert
+    (Y-up → Z-up: (x, y, z) → (x, -z, y)) so the returned position
+    matches the coord system the rest of this exporter uses.
     """
     bm = getattr(bone, "bind_matrix", None)
     if not bm or len(bm) != 16:
         return None
-    tx, ty, tz = bm[12], bm[13], bm[14]
+    # Convert Y-up → Z-up before applying position_scale.
+    yup_x, yup_y, yup_z = bm[12], bm[13], bm[14]
+    tx, ty, tz = _yup_to_zup_vec3((yup_x, yup_y, yup_z))
     # The matrix's bottom-right element should be 1.0 in a well-formed
     # rigid transform — anything else means we're misreading the layout
     # and the position is garbage.
@@ -710,13 +732,20 @@ def export_animation_fbx(
 
     def global_settings(b):
         def props70(b2):
-            W(b2, "P", ["UpAxis", "int", "Integer", "", 1])
+            # Z-up (matches Blender scene). All vertex/bone/keyframe
+            # data is pre-converted to Z-up by _yup_to_zup_* helpers,
+            # so UpAxis=2 tells Blender NOT to apply axis correction
+            # again. Mixing Y-up declaration with Z-up data was the
+            # cause of the 1.34m drift / X-flip we saw in mesh export.
+            W(b2, "P", ["UpAxis", "int", "Integer", "", 2])
             W(b2, "P", ["UpAxisSign", "int", "Integer", "", 1])
-            W(b2, "P", ["FrontAxis", "int", "Integer", "", 2])
-            W(b2, "P", ["FrontAxisSign", "int", "Integer", "", 1])
+            W(b2, "P", ["FrontAxis", "int", "Integer", "", 1])
+            W(b2, "P", ["FrontAxisSign", "int", "Integer", "", -1])
             W(b2, "P", ["CoordAxis", "int", "Integer", "", 0])
             W(b2, "P", ["CoordAxisSign", "int", "Integer", "", 1])
-            W(b2, "P", ["UnitScaleFactor", "double", "Number", "", 1.0])
+            # 100 cm per file unit = file is in METRES (PA native).
+            W(b2, "P", ["UnitScaleFactor", "double", "Number", "", 100.0])
+            W(b2, "P", ["OriginalUnitScaleFactor", "double", "Number", "", 100.0])
             # TimeMode 11 = 30 fps (FBX enum). TimeSpan + CurrentTime tell
             # the importer where to set the timeline ruler.
             W(b2, "P", ["TimeMode", "enum", "", "", 11])
@@ -827,16 +856,23 @@ def export_animation_fbx(
     per_bone_eulers: dict[int, list[tuple[float, float, float]]] = {}
     for bone_idx in range(bone_count):
         # PAA rotations are stored RELATIVE to the bone's bind-pose
-        # orientation (in PA's local frame). To produce a correct FBX
-        # Lcl Rotation we must compose the PAB bind rotation with the
-        # PAA per-frame rotation:
+        # orientation (in PA's local frame, Y-up). To produce a correct
+        # FBX Lcl Rotation we must:
         #
-        #     fbx_local_rot(t) = PAB_bind_rot ⊗ PAA_rot(t)
+        #   1. Compose the PAB bind rotation with the PAA per-frame
+        #      rotation in Y-up:
+        #          local_rot_yup(t) = PAB_bind_rot_yup ⊗ PAA_rot_yup(t)
         #
-        # Without this composition, animations start at an effectively
-        # identity-rotated bone instead of its T-pose orientation, and
-        # every file looks like the same scrambled blob because the
-        # T-pose offset gets dropped.
+        #   2. Convert the result from Y-up to Z-up via the basis-change
+        #      quaternion (+90° X rotation). Without this step the
+        #      animation curves are in a different coordinate system
+        #      than the bone bind matrices (which we DO axis-convert
+        #      in the bind-matrix path), and Blender shows a working
+        #      armature in T-pose but garbage motion at runtime.
+        #
+        #   3. Decompose to intrinsic XYZ Euler — same convention
+        #      Blender uses for Lcl Rotation. Mismatch here was the
+        #      root cause of the mesh-export drift bug.
         if skeleton and bone_idx < len(skeleton.bones):
             bind_rot = skeleton.bones[bone_idx].rotation or (0.0, 0.0, 0.0, 1.0)
         else:
@@ -850,11 +886,15 @@ def export_animation_fbx(
                 paa_quat = kf.bone_rotations[bone_idx]
             else:
                 paa_quat = (0.0, 0.0, 0.0, 1.0)
-            # Compose with PAB bind to recover world-frame local rotation
-            quat = _quat_mul(bind_rot, paa_quat)
+            # Step 1: compose in Y-up
+            quat_yup = _quat_mul(bind_rot, paa_quat)
+            # Step 2: convert Y-up → Z-up so the keyframe matches the
+            # bone's bind matrix coordinate system in the FBX
+            quat = _yup_to_zup_quat(quat_yup)
             # Enforce S³ continuity BEFORE Euler decomposition
             quat = _canonicalize_quaternion_sign(quat, previous_quat)
             previous_quat = quat
+            # Step 3: intrinsic XYZ Euler decomposition
             euler = _quat_xyzw_to_euler_xyz_degrees(*quat)
             euler = _ensure_euler_continuity(euler, previous_euler)
             series.append(euler)
@@ -957,14 +997,17 @@ def export_animation_fbx(
                 if abs(pos[0]) < 1e-9 and abs(pos[1]) < 1e-9 and abs(pos[2]) < 1e-9:
                     eps = 1e-4 * (_i + 1)
                     pos = (eps, eps * 0.5, -eps * 0.5)
-                # Convert PAA metres -> FBX centimetres (see POSITION_SCALE).
+                # `pos` here came from _bone_world_position which already
+                # axis-converts Y-up → Z-up. Apply POSITION_SCALE (1.0
+                # since UnitScaleFactor=100 declares the file in metres).
                 pos = (pos[0] * POSITION_SCALE,
                        pos[1] * POSITION_SCALE,
                        pos[2] * POSITION_SCALE)
-                # Convert bind-pose quaternion to Euler XYZ degrees so
-                # the armature displays its proper rest pose in Blender
-                # (before the animation curves apply).
-                rot_euler_deg = _quat_xyzw_to_euler_xyz_degrees(*rot)
+                # Convert bind-pose quaternion (from PAB, Y-up) to Z-up
+                # to match the rest of the export's coordinate system,
+                # THEN decompose to intrinsic XYZ Euler degrees.
+                rot_zup = _yup_to_zup_quat(rot)
+                rot_euler_deg = _quat_xyzw_to_euler_xyz_degrees(*rot_zup)
                 def props(b3, _p=pos, _r=rot_euler_deg):
                     W(b3, "P", ["Lcl Translation", "Lcl Translation", "", "A",
                                 float(_p[0]), float(_p[1]), float(_p[2])])
@@ -1003,12 +1046,20 @@ def export_animation_fbx(
                 # for FBX). Transform = inverse of TransformLink so the
                 # mesh in rest pose round-trips through the deformer
                 # cleanly when no animation is applied.
-                bind_world = _matrix_pab_row_to_fbx_column(
+                bind_world_yup = _matrix_pab_row_to_fbx_column(
                     bone.bind_matrix or ()
                 )
-                # Apply POSITION_SCALE to the translation column of the
-                # bind matrix so it lives in the same cm coordinate
-                # system as the vertices.
+                # Convert the WHOLE matrix (rotation columns + translation)
+                # from Y-up to Z-up so the cluster's TransformLink lives
+                # in the same coord system as the bone's matrix_local
+                # in Blender. Mismatched coord systems between bone and
+                # cluster TL is what produced the 1.34m skin drift in
+                # mesh_exporter — same fix applies here.
+                bind_world = _yup_to_zup_mat4(bind_world_yup)
+                bind_world = list(bind_world)
+                # POSITION_SCALE is 1.0 (UnitScaleFactor=100 declares
+                # metres) — kept multiplicative for clarity / future
+                # tuning.
                 bind_world[12] *= POSITION_SCALE
                 bind_world[13] *= POSITION_SCALE
                 bind_world[14] *= POSITION_SCALE
