@@ -632,6 +632,12 @@ def _build_speaker_records(records: list[DialogueRecord]) -> list[DialogueSpeake
 
 
 def build_dialogue_catalog(vfs: VfsManager, progress_fn: PROGRESS_FN | None = None) -> DialogueCatalogData:
+    """Pure (uncached) build. Always reparses + rebuilds.
+
+    Most callers should use :func:`build_dialogue_catalog_cached`
+    instead — it returns the same data but skips the 30-90 s rebuild
+    on second open.
+    """
     _progress(progress_fn, "Loading localization entries...")
     entries = _load_localization_entries(vfs)
 
@@ -671,6 +677,37 @@ def build_dialogue_catalog(vfs: VfsManager, progress_fn: PROGRESS_FN | None = No
     conversations = _build_conversation_records(records)
     speakers = _build_speaker_records(records)
     return DialogueCatalogData(records=records, conversations=conversations, speakers=speakers)
+
+
+def build_dialogue_catalog_cached(
+    vfs: VfsManager,
+    progress_fn: PROGRESS_FN | None = None,
+) -> DialogueCatalogData:
+    """Disk-cached wrapper around :func:`build_dialogue_catalog`.
+
+    The first call on a fresh game install runs the full build
+    (30-90 s on a real install) and pickles the result to
+    ``~/.crimsonforge/cache/dialogue_catalog.pkl``. Subsequent calls
+    that find a matching fingerprint deserialize in ~100 ms.
+
+    The fingerprint covers the only PAMT this build reads ("0020").
+    When Steam patches the game, the PAMT's mtime changes, the
+    fingerprint mismatches, and we transparently rebuild.
+    """
+    from utils import build_cache
+
+    pamt_path = Path(vfs.packages_path) / "0020" / "0.pamt"
+    fingerprint = build_cache.fingerprint_paths([pamt_path])
+
+    cached = build_cache.load_cached("dialogue_catalog", fingerprint)
+    if cached is not None:
+        _progress(progress_fn, "Loaded dialogue catalog from cache.")
+        return cached
+
+    data = build_dialogue_catalog(vfs, progress_fn=progress_fn)
+    _progress(progress_fn, "Caching dialogue catalog for next launch...")
+    build_cache.save_cached("dialogue_catalog", fingerprint, data)
+    return data
 
 
 def write_dialogue_exports(data: DialogueCatalogData, output_dir: str | Path) -> dict[str, Path]:

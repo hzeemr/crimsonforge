@@ -784,6 +784,12 @@ def build_game_data_tables(vfs: VfsManager) -> list[GameDataTableRecord]:
 
 
 def build_item_catalog(vfs: VfsManager, progress_fn: PROGRESS_FN | None = None) -> ItemCatalogData:
+    """Pure (uncached) build. Always reparses + rebuilds.
+
+    Most callers should use :func:`build_item_catalog_cached` instead
+    — it returns the same data but skips the full rebuild on every
+    open by reusing a pickled snapshot from the previous run.
+    """
     _progress(progress_fn, "Loading equip types from game data...")
     equip_types = parse_equip_types(vfs)
 
@@ -809,6 +815,37 @@ def build_item_catalog(vfs: VfsManager, progress_fn: PROGRESS_FN | None = None) 
     )
     tables.sort(key=lambda table: (table.domain.lower(), table.file_name.lower()))
     return ItemCatalogData(items=items, tables=tables)
+
+
+def build_item_catalog_cached(
+    vfs: VfsManager,
+    progress_fn: PROGRESS_FN | None = None,
+) -> ItemCatalogData:
+    """Disk-cached wrapper around :func:`build_item_catalog`.
+
+    First call parses every PABGB game-data file (slow); subsequent
+    calls deserialize the pickled result in ~100 ms. The fingerprint
+    covers PAMTs the build reads (0008 game-data + 0009 hash table) —
+    a Steam patch bumps mtime there, invalidates the cache, and the
+    next open transparently rebuilds.
+    """
+    from utils import build_cache
+
+    pkg = Path(vfs.packages_path)
+    fingerprint = build_cache.fingerprint_paths([
+        pkg / "0008" / "0.pamt",
+        pkg / "0009" / "0.pamt",
+    ])
+
+    cached = build_cache.load_cached("item_catalog", fingerprint)
+    if cached is not None:
+        _progress(progress_fn, "Loaded item catalog from cache.")
+        return cached
+
+    data = build_item_catalog(vfs, progress_fn=progress_fn)
+    _progress(progress_fn, "Caching item catalog for next launch...")
+    build_cache.save_cached("item_catalog", fingerprint, data)
+    return data
 
 
 def write_catalog_exports(data: ItemCatalogData, output_dir: str | Path) -> dict[str, Path]:

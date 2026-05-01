@@ -313,6 +313,59 @@ def build_paloc_lookup(vfs: VfsManager, groups: list[str],
     return lookup
 
 
+def build_audio_index_cached(
+    vfs: VfsManager,
+    groups: list[str],
+    progress_callback=None,
+) -> list[AudioEntry]:
+    """Disk-cached wrapper that does paloc lookup + audio index together.
+
+    The Audio tab's slow path (~30-90 s on a full game install) runs
+    :func:`build_paloc_lookup` over ~14 paloc files and then
+    :func:`build_audio_index` over hundreds of thousands of voice
+    entries. Both produce data that's expensive to re-compute but
+    cheap to serialize. We pickle the linked AudioEntry list keyed
+    on the fingerprint of every PAMT we'd otherwise re-read; on a
+    cache hit the second open of the Audio tab takes ~100 ms.
+
+    The paloc lookup itself is not returned — callers don't keep it
+    alive once linking is done — so we throw it away after writing
+    the linked entries to cache.
+    """
+    from utils import build_cache
+    from pathlib import Path as _Path
+
+    pkg = _Path(vfs.packages_path)
+    fingerprint = build_cache.fingerprint_paths([
+        pkg / g / "0.pamt" for g in sorted(groups)
+    ])
+
+    cached = build_cache.load_cached("audio_index", fingerprint)
+    if cached is not None:
+        if progress_callback:
+            progress_callback(100, "Loaded audio index from cache.")
+        return cached
+
+    if progress_callback:
+        progress_callback(0, "Building paloc text lookup...")
+    paloc_lookup = build_paloc_lookup(
+        vfs, groups,
+        progress_callback=lambda _p, m: progress_callback(_p, m) if progress_callback else None,
+    )
+
+    if progress_callback:
+        progress_callback(0, "Indexing voice audio files...")
+    entries = build_audio_index(
+        vfs, groups, paloc_lookup,
+        progress_callback=progress_callback,
+    )
+
+    if progress_callback:
+        progress_callback(100, "Caching audio index for next launch...")
+    build_cache.save_cached("audio_index", fingerprint, entries)
+    return entries
+
+
 def get_all_categories(entries: list[AudioEntry]) -> list[str]:
     """Get sorted list of all unique categories."""
     cats = sorted(set(e.category for e in entries if e.category))
