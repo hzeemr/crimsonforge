@@ -37,6 +37,10 @@ HDR_MESH_COUNT = 0x10
 HDR_BBOX_MIN = 0x14
 HDR_BBOX_MAX = 0x20
 HDR_GEOM_OFF = 0x3C
+# When non-zero, field 0x44 is the LZ4-compressed size of the geometry
+# section and 0x40 is the expected decompressed size.
+HDR_GEOM_DECOMP_SIZE = 0x40
+HDR_GEOM_COMP_SIZE   = 0x44
 
 # Submesh table
 SUBMESH_TABLE = 0x410
@@ -257,17 +261,29 @@ def _find_local_stride(data: bytes, geom_off: int, voff: int, n_verts: int, n_id
 
 # ── PAM Parser ───────────────────────────────────────────────────────
 
+_XAR_MAGIC = b"XAR "  # extended PAR variant; same layout, no parseable geometry
+
 def parse_pam(data: bytes, filename: str = "") -> ParsedMesh:
     """Parse a .pam static mesh file."""
-    if len(data) < 0x40 or data[:4] != PAR_MAGIC:
+    if len(data) < 0x40 or (data[:4] != PAR_MAGIC and data[:4] != _XAR_MAGIC):
         raise ValueError(f"Not a valid PAM file: bad magic {data[:4]!r}")
+    if data[:4] == _XAR_MAGIC:
+        return ParsedMesh(path=filename, format="pam")
 
     result = ParsedMesh(path=filename, format="pam")
     result.bbox_min = struct.unpack_from("<fff", data, HDR_BBOX_MIN)
     result.bbox_max = struct.unpack_from("<fff", data, HDR_BBOX_MAX)
-    geom_off = struct.unpack_from("<I", data, HDR_GEOM_OFF)[0]
+    geom_off   = struct.unpack_from("<I", data, HDR_GEOM_OFF)[0]
+    geom_decomp = struct.unpack_from("<I", data, HDR_GEOM_DECOMP_SIZE)[0]
+    geom_comp   = struct.unpack_from("<I", data, HDR_GEOM_COMP_SIZE)[0]
     mesh_count = struct.unpack_from("<I", data, HDR_MESH_COUNT)[0]
     bmin, bmax = result.bbox_min, result.bbox_max
+
+    if geom_comp:
+        import lz4.block
+        compressed = data[geom_off : geom_off + geom_comp]
+        decompressed = lz4.block.decompress(compressed, uncompressed_size=geom_decomp)
+        data = data[:geom_off] + decompressed
 
     # Read submesh table
     raw_entries = []
@@ -296,7 +312,8 @@ def parse_pam(data: bytes, filename: str = "") -> ParsedMesh:
             ie_acc += r["ni"]
 
     if is_combined:
-        _parse_combined_buffer(data, raw_entries, geom_off, bmin, bmax, result)
+        _parse_combined_buffer(data, raw_entries, geom_off, bmin, bmax, result,
+                               geom_decomp=geom_decomp)
     else:
         _parse_independent_meshes(data, raw_entries, geom_off, bmin, bmax, result)
 
@@ -576,15 +593,45 @@ def _parse_scan_fallback(data, entries, geom_off, bmin, bmax, result):
     logger.debug("Scan fallback: no valid vertex block found after 0x%X", geom_off)
 
 
-def _parse_combined_buffer(data, entries, geom_off, bmin, bmax, result):
+def _parse_combined_buffer(data, entries, geom_off, bmin, bmax, result,
+                           geom_decomp: int = 0):
     """Parse PAM with shared vertex + index buffer."""
     total_verts = sum(r["nv"] for r in entries)
     total_idx = sum(r["ni"] for r in entries)
-    avail = len(data) - geom_off
 
-    target = (avail - total_idx * 2) / total_verts if total_verts else 0
-    stride = min(STRIDE_CANDIDATES, key=lambda s: abs(s - target))
-    if geom_off + total_verts * stride + total_idx * 2 > len(data):
+    stride = None
+
+    # When the expected decompressed geometry size is known (from PAM header
+    # field 0x40), derive the stride algebraically instead of probing.
+    # This is essential for files with total_verts > 65535, where any u16
+    # index is trivially < total_verts and the probe gives false positives.
+    if geom_decomp > 0 and total_verts > 0:
+        idx_bytes = total_idx * 2
+        if geom_decomp > idx_bytes:
+            remainder = geom_decomp - idx_bytes
+            if remainder % total_verts == 0:
+                candidate = remainder // total_verts
+                if candidate in STRIDE_CANDIDATES:
+                    idx_base_c = geom_off + total_verts * candidate
+                    if idx_base_c + idx_bytes <= len(data):
+                        stride = candidate
+
+    # Fallback: iterate candidates and validate a sample of indices.
+    # Reliable only when total_verts <= 65535 (otherwise all u16 are valid).
+    if stride is None:
+        for s in STRIDE_CANDIDATES:
+            idx_base_s = geom_off + total_verts * s
+            if idx_base_s + total_idx * 2 > len(data):
+                continue
+            probe = min(total_idx, 50)
+            valid = sum(
+                1 for j in range(probe)
+                if struct.unpack_from("<H", data, idx_base_s + j * 2)[0] < total_verts
+            )
+            if valid == probe:
+                stride = s
+                break
+    if stride is None:
         return
 
     idx_base = geom_off + total_verts * stride
@@ -695,6 +742,171 @@ def _extract_global_mesh(data, geom_off, ni, ioff, bmin, bmax):
 
 # ── PAMLOD Parser ────────────────────────────────────────────────────
 
+def _get_pamlod_lod_chunks(data: bytes, geom_off: int, lod_count: int) -> list[bytes] | None:
+    """Extract per-LOD geometry chunks from the embedded file table.
+
+    Three table layouts are supported (all at geom_off - (lod_count+1)*12):
+
+    Format A/C — [start_offset, decomp_size, lz4_size] per LOD:
+      LOD0's entry has start_offset == geom_off.  It may be at entries[0]
+      (Format A, no preceding placeholder) or entries[1] (Format C, entries[0]
+      is all-zero).  lz4_size=0 means raw; >0 means LZ4-block-compressed.
+      e.g. cd_barricade_gaurd_02.pamlod (A), cd_spot_tower_10_stairs_01.pamlod (C)
+
+    Format B — [decomp_size, lz4_size, section_end_offset] per LOD:
+      entries[0] = [0, 0, geom_off] anchors the geometry start.
+      For LOD k: section starts at entries[k].f3, decomp/lz4 are in entries[k+1].
+      e.g. cd_puzzle_anamorphic_north_01.pamlod
+
+    Returns one bytes object per LOD, or None to fall back to sequential scan.
+    """
+    table_base = geom_off - (lod_count + 1) * 12
+    if table_base < 0:
+        return None
+    geom_size = len(data) - geom_off
+
+    entries = []
+    for i in range(lod_count + 1):
+        off = table_base + i * 12
+        if off + 12 > len(data):
+            return None
+        entries.append((
+            struct.unpack_from("<I", data, off)[0],
+            struct.unpack_from("<I", data, off + 4)[0],
+            struct.unpack_from("<I", data, off + 8)[0],
+        ))
+
+    import lz4.block as _lz4
+
+    def _read_chunk(file_off: int, decomp_sz: int, comp_sz: int) -> bytes | None:
+        """Decompress or slice one LOD chunk; return None on error."""
+        if file_off >= len(data) or decomp_sz == 0:
+            return None
+        if comp_sz > 0:
+            if comp_sz >= decomp_sz or file_off + comp_sz > len(data):
+                return None
+            try:
+                return bytes(_lz4.decompress(data[file_off : file_off + comp_sz],
+                                             uncompressed_size=decomp_sz))
+            except Exception:
+                return None
+        else:
+            if file_off + decomp_sz > len(data):
+                return None
+            return bytes(data[file_off : file_off + decomp_sz])
+
+    # ── Format A/C ───────────────────────────────────────────────────
+    # Find the entry where f1 == geom_off; that entry and the next
+    # (lod_count-1) entries describe LOD0 .. LOD(N-1).
+    # A: cd_barricade_gaurd_02.pamlod (LOD0 entry at index 0)
+    # C: cd_spot_tower_10_stairs_01.pamlod (all-zero placeholder at index 0)
+    lod0_idx = None
+    for i, (f1, _, _) in enumerate(entries):
+        if f1 == geom_off and i + lod_count <= len(entries):
+            lod0_idx = i
+            break
+
+    if lod0_idx is not None:
+        lod_entries = entries[lod0_idx : lod0_idx + lod_count]
+        has_compressed = any(cs > 0 for _, _, cs in lod_entries)
+        if not has_compressed:
+            return None  # all raw — sequential scan handles this
+
+        chunks: list[bytes] = []
+        for file_off, decomp_sz, comp_sz in lod_entries:
+            c = _read_chunk(file_off, decomp_sz, comp_sz)
+            if c is None:
+                return None
+            chunks.append(c)
+        return chunks
+
+    # ── Format B ─────────────────────────────────────────────────────
+    # entries[0] = [0, 0, geom_off]; each subsequent entry has
+    # [decomp, lz4, end_offset] and entries[k].f3 is the section start.
+    # e.g. cd_puzzle_anamorphic_north_01.pamlod
+    if entries[0][2] == geom_off:
+        has_compressed = any(entries[k + 1][1] > 0 for k in range(lod_count))
+        if not has_compressed:
+            return None
+
+        chunks = []
+        for k in range(lod_count):
+            start     = entries[k][2]       # section start in file
+            decomp_sz = entries[k + 1][0]   # decompressed size
+            lz4_sz    = entries[k + 1][1]   # LZ4 block size (0 = raw)
+            c = _read_chunk(start, decomp_sz, lz4_sz)
+            if c is None:
+                return None
+            chunks.append(c)
+        return chunks
+
+    # ── Format D ─────────────────────────────────────────────────────
+    # entries[k] = [lz4_size_of_prev_LOD, start_offset, decomp_size].
+    # entries[0].f2 == geom_off; LZ4 size for LOD k is entries[k+1].f1.
+    # e.g. cd_aka_house_module_b_roof_0002.pamlod
+    if entries[0][1] == geom_off:
+        has_lz4_d = any(entries[k + 1][0] > 0 for k in range(lod_count))
+        has_any_data_d = any(entries[k][2] > 0 for k in range(lod_count))
+        if not has_any_data_d:
+            return None
+        # For all-raw Format D tables validate decomp sum ≈ geom_size to avoid
+        # false positives from garbage bytes at the table position.
+        if not has_lz4_d:
+            all_decomp = sum(entries[k][2] for k in range(lod_count))
+            if abs(all_decomp - geom_size) > 32 * lod_count:
+                return None
+
+        chunks = []
+        for k in range(lod_count):
+            start     = entries[k][1]       # f2 = section start in file
+            decomp_sz = entries[k][2]       # f3 = decompressed size
+            lz4_sz    = entries[k + 1][0]   # next entry's f1 = LZ4 block size (0=raw)
+            c = _read_chunk(start, decomp_sz, lz4_sz)
+            if c is None:
+                return None
+            chunks.append(c)
+        return chunks
+
+    return None
+
+
+def _match_chunks_to_groups(chunks: list[bytes],
+                            groups: list) -> list[tuple | None]:
+    """Pair each chunk with the lod_group whose geometry size matches.
+
+    For each chunk of size S, find the group (tv, ti) and stride s such that
+    tv*s + ti*2 == S.  Returns a list of (group, stride) or None when unmatched.
+    Used when the per-LOD table provides the authoritative LOD order which may
+    differ from vertex-count order.
+    """
+    matched: list[tuple | None] = [None] * len(chunks)
+    used: set[int] = set()
+    # Try strides in descending order then validate indices to resolve ambiguity
+    # when multiple (group, stride) pairs produce the same chunk size.
+    for k, chunk in enumerate(chunks):
+        S = len(chunk)
+        for s in reversed(STRIDE_CANDIDATES):
+            for gi, grp in enumerate(groups):
+                if gi in used:
+                    continue
+                tv = sum(e["nv"] for e in grp)
+                ti = sum(e["ni"] for e in grp)
+                if tv * s + ti * 2 != S:
+                    continue
+                # Validate that indices at the expected position are all < tv
+                idx_base = tv * s
+                if idx_base + min(ti, 100) * 2 > len(chunk):
+                    continue
+                if all(struct.unpack_from("<H", chunk, idx_base + j * 2)[0] < tv
+                       for j in range(min(ti, 100))):
+                    matched[k] = (grp, s)
+                    used.add(gi)
+                    break
+            if matched[k] is not None:
+                break
+    return matched
+
+
 def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedMesh:
     """Parse a .pamlod LOD mesh file. lod_level=0 is highest quality."""
     result = ParsedMesh(path=filename, format="pamlod")
@@ -708,10 +920,17 @@ def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedM
     result.bbox_max = struct.unpack_from("<fff", data, PAMLOD_BBOX_MAX)
     bmin, bmax = result.bbox_min, result.bbox_max
 
-    # Locate LOD entries by scanning for .dds texture strings
+    # Locate LOD entries by scanning for texture strings ending in "dds\0".
+    # Most entries use a full path like "name.dds\0"; some files (e.g. cave
+    # stalactites, large composite objects) use just "dds\0" with no prefix.
+    # Each submesh entry has a texture field AND a material field, both of which
+    # may end in "dds\0".  Material names sit 0x10C bytes after the texture name
+    # and produce false positives whose voff values exceed the geometry section
+    # size; the voff*6 > geom_size guard filters them out.
+    geom_size = len(data) - geom_off
     entries = []
     search_region = data[PAMLOD_ENTRY_TABLE:geom_off]
-    for m in re.finditer(rb"[^\x00]{1,255}\.dds\x00", search_region):
+    for m in re.finditer(rb"[^\x00]{0,255}dds\x00", search_region):
         tex_start = PAMLOD_ENTRY_TABLE + m.start()
         nv_off = tex_start - 0x10
         if nv_off < PAMLOD_ENTRY_TABLE:
@@ -722,6 +941,8 @@ def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedM
             continue
         voff = struct.unpack_from("<I", data, tex_start - 0x08)[0]
         ioff = struct.unpack_from("<I", data, tex_start - 0x04)[0]
+        if voff * 6 > geom_size:
+            continue
         tex = data[tex_start:tex_start + 256].split(b"\x00")[0].decode("ascii", "replace")
         mat_start = tex_start + 0x100
         mat = data[mat_start:mat_start + 256].split(b"\x00")[0].decode("ascii", "replace") if mat_start < geom_off else ""
@@ -751,32 +972,94 @@ def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedM
     if not lod_groups:
         return result
 
+    # Check for per-LOD geometry chunks (files where some LODs are LZ4-compressed
+    # within the raw PAZ payload but the PAMT decompressor returned raw bytes).
+    per_lod_chunks = _get_pamlod_lod_chunks(data, geom_off, lod_count)
+
+    # For sequential-scan files (no chunk table), sort groups by total vertex count
+    # descending so the highest-quality LOD is always first.  For some large
+    # composite objects the DDS entries for LOD0 appear after LOD1+ entries in
+    # the header, causing the file-position sort to assign a smaller LOD as LOD0.
+    if per_lod_chunks is None and len(lod_groups) > 1:
+        lod_groups.sort(key=lambda g: -sum(e["nv"] for e in g))
+
+    # Pre-compute the algebraic stride for sequential-scan files.  When any LOD
+    # has total_nv > 65535 the index-value probe is trivially satisfied (every
+    # u16 < total_nv), so the probe always accepts stride=6.  Deriving stride
+    # from the total geometry budget avoids this false-positive.
+    seq_alg_stride: int | None = None
+    if per_lod_chunks is None:
+        all_nv = sum(sum(e["nv"] for e in g) for g in lod_groups)
+        all_ni = sum(sum(e["ni"] for e in g) for g in lod_groups)
+        if all_nv > 0:
+            remaining = geom_size - all_ni * 2
+            if remaining > 0:
+                s_est = remaining / all_nv
+                best = min(STRIDE_CANDIDATES, key=lambda s: abs(s - s_est))
+                if abs(best - s_est) < 2.0:
+                    seq_alg_stride = best
+
+    # When per-LOD chunks are available, match each chunk to its lod_group by
+    # geometry size.  This is needed for files where the table's LOD order differs
+    # from the vertex-count order (e.g. eggs where LOD0 has fewer verts than LOD1).
+    chunk_matches: list[tuple | None] = []
+    if per_lod_chunks:
+        chunk_matches = _match_chunks_to_groups(per_lod_chunks, lod_groups)
+
     # Parse each LOD level
     cur = geom_off
     for lod_i, group in enumerate(lod_groups):
         total_nv = sum(e["nv"] for e in group)
         total_ni = sum(e["ni"] for e in group)
 
-        # Find stride with padding scan
-        found_base = found_stride = found_idx_off = None
-        for pad in range(0, 64, 2):
-            base = cur + pad
-            for stride in STRIDE_CANDIDATES:
-                cand = base + total_nv * stride
-                if cand + total_ni * 2 > len(data):
-                    continue
-                if all(struct.unpack_from("<H", data, cand + j * 2)[0] < total_nv
-                       for j in range(min(total_ni, 100))):
-                    found_base = base
-                    found_stride = stride
-                    found_idx_off = cand
+        # Use a pre-decompressed per-LOD chunk when available; otherwise fall
+        # back to scanning the main data buffer sequentially from cur.
+        if per_lod_chunks and lod_i < len(per_lod_chunks):
+            lod_buf   = per_lod_chunks[lod_i]
+            lod_start = 0
+        else:
+            lod_buf   = data
+            lod_start = cur
+
+        # When a chunk↔group match was found, use the matched group and stride
+        # directly — no stride scan needed.
+        matched_group_stride: tuple | None = (
+            chunk_matches[lod_i] if chunk_matches and lod_i < len(chunk_matches) else None
+        )
+        if matched_group_stride is not None:
+            group, matched_stride = matched_group_stride
+            total_nv = sum(e["nv"] for e in group)
+            total_ni = sum(e["ni"] for e in group)
+            found_base    = lod_start
+            found_stride  = matched_stride
+            found_idx_off = lod_start + total_nv * matched_stride
+        else:
+            # Find stride with padding scan.
+            # Use the algebraic stride when available (sequential scan, tv>65535 safe).
+            found_base = found_stride = found_idx_off = None
+            stride_candidates = (
+                [seq_alg_stride] if seq_alg_stride is not None and lod_buf is data
+                else STRIDE_CANDIDATES
+            )
+            for pad in range(0, 64, 2):
+                base = lod_start + pad
+                for stride in stride_candidates:
+                    cand = base + total_nv * stride
+                    if cand + total_ni * 2 > len(lod_buf):
+                        continue
+                    if all(struct.unpack_from("<H", lod_buf, cand + j * 2)[0] < total_nv
+                           for j in range(min(total_ni, 100))):
+                        found_base = base
+                        found_stride = stride
+                        found_idx_off = cand
+                        break
+                if found_base is not None:
                     break
-            if found_base is not None:
-                break
 
         if found_base is None:
             result.lod_levels.append([])
-            cur += 2
+            if lod_buf is data:
+                cur += 2
             continue
 
         # Parse submeshes for this LOD
@@ -790,22 +1073,22 @@ def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedM
             vert_base_e = found_base + e["voff"] * found_stride
             idx_off_e = found_idx_off + e["ioff"] * 2
 
-            indices = [struct.unpack_from("<H", data, idx_off_e + j * 2)[0] for j in range(ni_e)]
+            indices = [struct.unpack_from("<H", lod_buf, idx_off_e + j * 2)[0] for j in range(ni_e)]
             unique = sorted(set(indices))
             idx_map = {gi: li + vert_offset for li, gi in enumerate(unique)}
 
             for gi in unique:
                 foff = vert_base_e + gi * found_stride
-                if foff + 6 > len(data):
+                if foff + 6 > len(lod_buf):
                     break
-                xu, yu, zu = struct.unpack_from("<HHH", data, foff)
+                xu, yu, zu = struct.unpack_from("<HHH", lod_buf, foff)
                 all_offsets.append(foff)
                 all_verts.append((_dequant_u16(xu, bmin[0], bmax[0]),
                                   _dequant_u16(yu, bmin[1], bmax[1]),
                                   _dequant_u16(zu, bmin[2], bmax[2])))
-                if has_uv and foff + 12 <= len(data):
-                    u = struct.unpack_from("<e", data, foff + 8)[0]
-                    v = struct.unpack_from("<e", data, foff + 10)[0]
+                if has_uv and foff + 12 <= len(lod_buf):
+                    u = struct.unpack_from("<e", lod_buf, foff + 8)[0]
+                    v = struct.unpack_from("<e", lod_buf, foff + 10)[0]
                     all_uvs.append((u, v))
 
             for j in range(0, ni_e - 2, 3):
@@ -827,7 +1110,8 @@ def parse_pamlod(data: bytes, filename: str = "", lod_level: int = 0) -> ParsedM
         )
         lod_submeshes.append(sm)
         result.lod_levels.append(lod_submeshes)
-        cur = found_idx_off + total_ni * 2
+        if lod_buf is data:
+            cur = found_idx_off + total_ni * 2
 
     # Use requested LOD level as the main submeshes
     if lod_level < len(result.lod_levels) and result.lod_levels[lod_level]:
